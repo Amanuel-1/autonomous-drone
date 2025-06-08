@@ -150,22 +150,25 @@ export const updateDronePosition = (
   let desiredRoll = 0;  // Left/right tilt (Z-axis rotation)
 
   if (newState.isFlying) {
-    // Calculate desired tilt based on movement inputs
-    if (controls.moveForward) {
-      desiredPitch = -MAX_TILT_ANGLE * 0.7; // 70% of max tilt for forward (nose down to move forward)
-      console.log('FPV MOVE: FORWARD - Tilting nose down');
+    // Calculate movement vector in drone's local coordinate system
+    let localForward = 0; // Forward/backward input (-1 to 1)
+    let localRight = 0;   // Left/right input (-1 to 1)
+
+    // Convert control inputs to local movement vector
+    if (controls.moveForward) localForward += 1;
+    if (controls.moveBackward) localForward -= 1;
+    if (controls.moveRight) localRight += 1;
+    if (controls.moveLeft) localRight -= 1;
+
+    // Calculate desired tilt based on local movement vector
+    // Tilt TOWARDS the direction of movement (this creates the force in that direction)
+    if (localForward !== 0) {
+      desiredPitch = -localForward * MAX_TILT_ANGLE * 0.7; // Forward = nose down (negative pitch)
+      console.log('FPV MOVE: ' + (localForward > 0 ? 'FORWARD (nose down)' : 'BACKWARD (nose up)') + ' - Natural tilt');
     }
-    if (controls.moveBackward) {
-      desiredPitch = MAX_TILT_ANGLE * 0.5; // 50% for backward (nose up to move backward)
-      console.log('FPV MOVE: BACKWARD - Tilting nose up');
-    }
-    if (controls.moveLeft) {
-      desiredRoll = MAX_TILT_ANGLE * 0.7; // 70% of max tilt for left (positive roll)
-      console.log('FPV MOVE: LEFT - Rolling left');
-    }
-    if (controls.moveRight) {
-      desiredRoll = -MAX_TILT_ANGLE * 0.7; // 70% of max tilt for right (negative roll)
-      console.log('FPV MOVE: RIGHT - Rolling right');
+    if (localRight !== 0) {
+      desiredRoll = localRight * MAX_TILT_ANGLE * 0.7; // Right = roll right (positive roll)
+      console.log('FPV MOVE: ' + (localRight > 0 ? 'RIGHT' : 'LEFT') + ' - Rolling towards movement');
     }
 
     // Enhanced stabilization logic
@@ -223,28 +226,31 @@ export const updateDronePosition = (
     // Calculate thrust vector components based on drone orientation
     const thrustMagnitude = currentThrust / DRONE_MASS;
 
-    // Forward/backward force from pitch (nose up/down)
-    const forwardAcceleration = -Math.sin(pitch) * thrustMagnitude * THRUST_TO_ACCELERATION * deltaTime;
+    // Calculate forces in drone's local coordinate system first
+    // Forward/backward force from pitch (nose up/down) - relative to drone
+    const localForwardAccel = -Math.sin(pitch) * thrustMagnitude * THRUST_TO_ACCELERATION * deltaTime;
 
-    // Left/right force from roll (banking left/right)
-    const rightAcceleration = Math.sin(roll) * thrustMagnitude * THRUST_TO_ACCELERATION * deltaTime;
+    // Left/right force from roll (banking left/right) - relative to drone
+    const localRightAccel = -Math.sin(roll) * thrustMagnitude * THRUST_TO_ACCELERATION * deltaTime;
 
-    // Apply forces in world coordinates (accounting for yaw rotation)
-    // Standard coordinate transformation for drone physics
-    const worldAccelX = Math.cos(yaw) * rightAcceleration + Math.sin(yaw) * forwardAcceleration;
-    const worldAccelZ = -Math.sin(yaw) * rightAcceleration + Math.cos(yaw) * forwardAcceleration;
+    // Transform local forces to world coordinates using drone's yaw rotation
+    // This ensures tilt directions are always relative to drone's orientation
+    const worldAccelX = Math.cos(yaw) * localRightAccel + Math.sin(yaw) * localForwardAccel;
+    const worldAccelZ = -Math.sin(yaw) * localRightAccel + Math.cos(yaw) * localForwardAccel;
 
     newState.velocity.x += worldAccelX;
     newState.velocity.z += worldAccelZ;
 
     // Debug FPV physics
-    if (Math.abs(forwardAcceleration) > 0.01 || Math.abs(rightAcceleration) > 0.01) {
-      console.log('FPV Physics:', {
+    if (Math.abs(localForwardAccel) > 0.01 || Math.abs(localRightAccel) > 0.01) {
+      console.log('FPV Physics (Drone-Relative):', {
         pitch: (pitch * 180 / Math.PI).toFixed(1) + '°',
         roll: (roll * 180 / Math.PI).toFixed(1) + '°',
         yaw: (yaw * 180 / Math.PI).toFixed(1) + '°',
-        forwardAccel: forwardAcceleration.toFixed(3),
-        rightAccel: rightAcceleration.toFixed(3),
+        localForwardAccel: localForwardAccel.toFixed(3),
+        localRightAccel: localRightAccel.toFixed(3),
+        worldAccelX: worldAccelX.toFixed(3),
+        worldAccelZ: worldAccelZ.toFixed(3),
         velocityMagnitude: newState.velocity.length().toFixed(2) + 'm/s'
       });
     }
