@@ -1272,7 +1272,7 @@ export const DroneSimulation: React.FC = () => {
               </p>
               <p className="text-xs text-gray-400 flex items-center gap-1">
                 <Brain size={10} />
-                Network: 256→128→64 layers, 41 inputs
+                Network: 256→128→64 layers, 40 inputs
               </p>
               <p className="text-xs text-gray-400 flex items-center gap-1">
                 <Radar size={10} />

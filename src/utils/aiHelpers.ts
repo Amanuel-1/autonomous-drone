@@ -69,7 +69,7 @@ export function getActionName(action: DroneAction): string {
  */
 export function getDefaultNetworkConfig(): NeuralNetworkConfig {
   return {
-    inputSize: 41, // 3 pos + 3 vel + 3 rot + 4 status + 16 lidar + 1 lidar average + 2 flight status + 6 mission info + 3 spherical coverage
+    inputSize: 40, // 3 pos + 3 vel + 3 rot + 4 status + 16 lidar + 3 lidar indicators + 2 flight status + 6 mission info
     hiddenLayers: [256, 128, 64], // Smaller network for reduced LiDAR input
     outputSize: 9, // Number of possible actions
     learningRate: 0.0005, // Slightly higher learning rate for smaller network
