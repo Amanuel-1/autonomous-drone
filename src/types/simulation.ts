@@ -13,6 +13,9 @@ export interface DroneState {
   // Camera gimbal state
   cameraTilt: number; // Camera tilt angle (up/down) in radians
   cameraRotation: number; // Camera rotation angle (left/right) in radians
+  // Damage system
+  damage: number; // Current damage points
+  isDead: boolean; // Whether drone has crashed and is dead
 }
 
 export interface Building {
@@ -20,6 +23,13 @@ export interface Building {
   position: Vector3;
   size: Vector3;
   color: string;
+}
+
+export interface Tree {
+  id: string;
+  position: Vector3;
+  height: number;
+  radius: number;
 }
 
 export interface Environment {
@@ -53,3 +63,11 @@ export interface CameraSettings {
   height: number;
   angle: number;
 }
+
+// Global damage system constants
+export const DAMAGE_THRESHOLD = 100; // Drone dies when damage >= this value
+export const COLLISION_DAMAGE = {
+  BUILDING: 50, // Heavy damage from building collision
+  TREE: 25,     // Moderate damage from tree collision
+  GROUND: 30    // Damage from hard ground impact
+};

@@ -1,32 +1,35 @@
 'use client';
 
 import React from 'react';
-import { Building } from '../types/simulation';
+import { Vector3 } from 'three';
+import { Building, Tree } from '../types/simulation';
 
 interface EnvironmentProps {
   buildings: Building[];
   groundSize: number;
+  trees: Tree[];
 }
 
 // Generate trees once and reuse them
-const generateTrees = (groundSize: number) => {
+export const generateTrees = (groundSize: number): Tree[] => {
   return Array.from({ length: 15 }, (_, i) => {
     const x = (Math.random() - 0.5) * groundSize * 0.9;
     const z = (Math.random() - 0.5) * groundSize * 0.9;
     const height = Math.random() * 3 + 2;
+    const radius = 1.5; // Tree foliage radius
 
     return {
       id: `tree-${i}`,
-      x,
-      z,
-      height
+      position: new Vector3(x, height / 2, z),
+      height,
+      radius
     };
   });
 };
 
-const trees = generateTrees(100); // Generate trees once outside component
+export const defaultTrees = generateTrees(100); // Generate trees once outside component
 
-export const Environment: React.FC<EnvironmentProps> = ({ buildings, groundSize }) => {
+export const Environment: React.FC<EnvironmentProps> = ({ buildings, groundSize, trees }) => {
   return (
     <group>
       {/* Ground plane */}
@@ -77,7 +80,7 @@ export const Environment: React.FC<EnvironmentProps> = ({ buildings, groundSize 
       {/* Some decorative elements */}
       {/* Trees */}
       {trees.map((tree) => (
-        <group key={tree.id} position={[tree.x, 0, tree.z]}>
+        <group key={tree.id} position={[tree.position.x, 0, tree.position.z]}>
           {/* Tree trunk */}
           <mesh position={[0, tree.height / 2, 0]}>
             <cylinderGeometry args={[0.2, 0.3, tree.height]} />
@@ -85,7 +88,7 @@ export const Environment: React.FC<EnvironmentProps> = ({ buildings, groundSize 
           </mesh>
           {/* Tree foliage */}
           <mesh position={[0, tree.height + 1, 0]}>
-            <sphereGeometry args={[1.5]} />
+            <sphereGeometry args={[tree.radius]} />
             <meshStandardMaterial color="#228B22" />
           </mesh>
         </group>

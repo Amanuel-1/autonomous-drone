@@ -26,19 +26,28 @@ export const Drone: React.FC<DroneProps> = ({ droneState, onPositionChange }) =>
   }, [droneState]);
 
   useFrame((state, delta) => {
-    // Animate propellers based on engine power
+    // Animate propellers based on engine power (stop if dead)
     propellerRefs.current.forEach((propeller) => {
-      if (propeller) {
+      if (propeller && !droneState.isDead) {
         const rotationSpeed = droneState.enginePower * 25 + (droneState.isFlying ? 5 : 0);
         propeller.rotation.y += delta * rotationSpeed;
       }
     });
 
-    // Add slight hovering animation when flying
-    if (droneRef.current && droneState.isFlying) {
-      const time = state.clock.getElapsedTime();
-      const hoverOffset = Math.sin(time * 4) * 0.05 * droneState.enginePower;
-      droneRef.current.position.y = droneState.position.y + hoverOffset;
+    // Add slight hovering animation when flying, or crash effects when dead
+    if (droneRef.current) {
+      if (droneState.isDead) {
+        // Add crash smoke/spark effect (subtle position jitter)
+        const time = state.clock.getElapsedTime();
+        const crashJitter = Math.sin(time * 20) * 0.02;
+        droneRef.current.position.copy(droneState.position);
+        droneRef.current.position.x += crashJitter;
+        droneRef.current.position.z += crashJitter * 0.5;
+      } else if (droneState.isFlying) {
+        const time = state.clock.getElapsedTime();
+        const hoverOffset = Math.sin(time * 4) * 0.05 * droneState.enginePower;
+        droneRef.current.position.y = droneState.position.y + hoverOffset;
+      }
     }
 
     // Notify parent of position changes
@@ -52,7 +61,9 @@ export const Drone: React.FC<DroneProps> = ({ droneState, onPositionChange }) =>
       {/* Main body */}
       <mesh position={[0, 0, 0]}>
         <boxGeometry args={[2, 0.5, 2]} />
-        <meshStandardMaterial color="#333333" />
+        <meshStandardMaterial
+          color={droneState.isDead ? "#660000" : droneState.damage > 50 ? "#663333" : "#333333"}
+        />
       </mesh>
 
       {/* Propeller arms */}
@@ -80,9 +91,9 @@ export const Drone: React.FC<DroneProps> = ({ droneState, onPositionChange }) =>
       >
         <cylinderGeometry args={[0.8, 0.8, 0.02]} />
         <meshStandardMaterial
-          color="#cccccc"
+          color={droneState.isDead ? "#666666" : "#cccccc"}
           transparent
-          opacity={droneState.enginePower > 0.1 ? 0.3 : 0.8}
+          opacity={droneState.isDead ? 0.1 : (droneState.enginePower > 0.1 ? 0.3 : 0.8)}
         />
       </mesh>
       <mesh
@@ -91,9 +102,9 @@ export const Drone: React.FC<DroneProps> = ({ droneState, onPositionChange }) =>
       >
         <cylinderGeometry args={[0.8, 0.8, 0.02]} />
         <meshStandardMaterial
-          color="#cccccc"
+          color={droneState.isDead ? "#666666" : "#cccccc"}
           transparent
-          opacity={droneState.enginePower > 0.1 ? 0.3 : 0.8}
+          opacity={droneState.isDead ? 0.1 : (droneState.enginePower > 0.1 ? 0.3 : 0.8)}
         />
       </mesh>
       <mesh
@@ -102,9 +113,9 @@ export const Drone: React.FC<DroneProps> = ({ droneState, onPositionChange }) =>
       >
         <cylinderGeometry args={[0.8, 0.8, 0.02]} />
         <meshStandardMaterial
-          color="#cccccc"
+          color={droneState.isDead ? "#666666" : "#cccccc"}
           transparent
-          opacity={droneState.enginePower > 0.1 ? 0.3 : 0.8}
+          opacity={droneState.isDead ? 0.1 : (droneState.enginePower > 0.1 ? 0.3 : 0.8)}
         />
       </mesh>
       <mesh
@@ -113,9 +124,9 @@ export const Drone: React.FC<DroneProps> = ({ droneState, onPositionChange }) =>
       >
         <cylinderGeometry args={[0.8, 0.8, 0.02]} />
         <meshStandardMaterial
-          color="#cccccc"
+          color={droneState.isDead ? "#666666" : "#cccccc"}
           transparent
-          opacity={droneState.enginePower > 0.1 ? 0.3 : 0.8}
+          opacity={droneState.isDead ? 0.1 : (droneState.enginePower > 0.1 ? 0.3 : 0.8)}
         />
       </mesh>
 
@@ -123,9 +134,9 @@ export const Drone: React.FC<DroneProps> = ({ droneState, onPositionChange }) =>
       <mesh position={[0, -0.1, 1]}>
         <sphereGeometry args={[0.1]} />
         <meshStandardMaterial
-          color="#00ff00"
-          emissive="#00ff00"
-          emissiveIntensity={droneState.isFlying ? 0.8 : 0.2}
+          color={droneState.isDead ? "#ff0000" : "#00ff00"}
+          emissive={droneState.isDead ? "#ff0000" : "#00ff00"}
+          emissiveIntensity={droneState.isDead ? 1.0 : (droneState.isFlying ? 0.8 : 0.2)}
         />
       </mesh>
       <mesh position={[0, -0.1, -1]}>
@@ -133,7 +144,7 @@ export const Drone: React.FC<DroneProps> = ({ droneState, onPositionChange }) =>
         <meshStandardMaterial
           color="#ff0000"
           emissive="#ff0000"
-          emissiveIntensity={droneState.isFlying ? 0.8 : 0.2}
+          emissiveIntensity={droneState.isDead ? 1.0 : (droneState.isFlying ? 0.8 : 0.2)}
         />
       </mesh>
 
@@ -184,6 +195,47 @@ export const Drone: React.FC<DroneProps> = ({ droneState, onPositionChange }) =>
           </group>
         </group>
       </group>
+
+      {/* Damage/Crash Effects */}
+      {droneState.isDead && (
+        <group>
+          {/* Smoke effect (simple dark spheres) */}
+          {Array.from({ length: 5 }, (_, i) => (
+            <mesh key={i} position={[
+              (Math.random() - 0.5) * 2,
+              0.5 + Math.random() * 1,
+              (Math.random() - 0.5) * 2
+            ]}>
+              <sphereGeometry args={[0.1 + Math.random() * 0.1]} />
+              <meshBasicMaterial
+                color="#333333"
+                transparent
+                opacity={0.3 + Math.random() * 0.3}
+              />
+            </mesh>
+          ))}
+        </group>
+      )}
+
+      {/* Damage sparks effect */}
+      {droneState.damage > 50 && !droneState.isDead && (
+        <group>
+          {Array.from({ length: 3 }, (_, i) => (
+            <mesh key={i} position={[
+              (Math.random() - 0.5) * 1,
+              0.2,
+              (Math.random() - 0.5) * 1
+            ]}>
+              <sphereGeometry args={[0.02]} />
+              <meshBasicMaterial
+                color="#ffaa00"
+                emissive="#ffaa00"
+                emissiveIntensity={0.8}
+              />
+            </mesh>
+          ))}
+        </group>
+      )}
     </group>
   );
 };

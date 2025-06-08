@@ -1,5 +1,5 @@
 import { Vector3 } from 'three';
-import { Building, DroneState, SimulationControls } from '../types/simulation';
+import { Building, Tree, DroneState, SimulationControls, DAMAGE_THRESHOLD, COLLISION_DAMAGE } from '../types/simulation';
 
 export const generateBuildings = (count: number, areaSize: number): Building[] => {
   const buildings: Building[] = [];
@@ -29,7 +29,9 @@ export const generateBuildings = (count: number, areaSize: number): Building[] =
 export const updateDronePosition = (
   droneState: DroneState,
   controls: SimulationControls,
-  deltaTime: number
+  deltaTime: number,
+  buildings: Building[] = [],
+  trees: Tree[] = []
 ): DroneState => {
   const newState = {
     ...droneState,
@@ -276,8 +278,94 @@ export const updateDronePosition = (
   // Limit vertical speed
   newState.velocity.y = Math.max(-maxVerticalSpeed, Math.min(maxVerticalSpeed, newState.velocity.y));
 
+  // ===== COLLISION DETECTION AND DAMAGE SYSTEM =====
+  if (!newState.isDead) {
+    const collisionResult = checkCollisionsWithDamage(newState, buildings, trees);
+
+    if (collisionResult.hasCollision) {
+      // Correct position to prevent clipping through objects
+      if (collisionResult.correctedPosition) {
+        newState.position.copy(collisionResult.correctedPosition);
+      }
+
+      // Apply damage and immediately crash the drone
+      newState.damage += collisionResult.damage;
+      console.log(`COLLISION: ${collisionResult.type} - Damage: ${collisionResult.damage}, Total: ${newState.damage}`);
+
+      // Any collision with buildings or trees causes immediate crash
+      newState.isDead = true;
+      newState.isFlying = false;
+      newState.isLanded = false;
+      newState.throttle = 0;
+      newState.enginePower = 0;
+
+      // Add impact velocity for realistic crash
+      if (collisionResult.impactNormal) {
+        // Bounce off the surface with reduced velocity
+        const impactForce = newState.velocity.length() * 0.5;
+        newState.velocity.copy(collisionResult.impactNormal.multiplyScalar(impactForce));
+        // Add some downward velocity for crash effect
+        newState.velocity.y = Math.min(newState.velocity.y, -2);
+      }
+
+      console.log('DRONE DESTROYED: Collision detected - entering crash sequence');
+    }
+  }
+
+  // ===== DEATH PHYSICS: Free fall when dead =====
+  if (newState.isDead) {
+    // Disable all controls when dead
+    newState.throttle = 0;
+    newState.enginePower = 0;
+
+    // Apply gravity only (free fall)
+    const GRAVITY = 9.81;
+    const DRONE_MASS = 0.5;
+    newState.velocity.y -= (GRAVITY * deltaTime);
+
+    // Add tumbling effect
+    newState.angularVelocity.x += (Math.random() - 0.5) * 0.1;
+    newState.angularVelocity.z += (Math.random() - 0.5) * 0.1;
+    newState.rotation.x += newState.angularVelocity.x * deltaTime;
+    newState.rotation.z += newState.angularVelocity.z * deltaTime;
+  }
+
   // ===== UPDATE POSITION =====
+  // Store old position for collision rollback
+  const oldPosition = newState.position.clone();
+
+  // Apply movement
   newState.position.add(newState.velocity.clone().multiplyScalar(deltaTime));
+
+  // Check for collisions after movement (prevent clipping)
+  if (!newState.isDead) {
+    const postMovementCollision = checkCollisionsWithDamage(newState, buildings, trees);
+
+    if (postMovementCollision.hasCollision) {
+      // Rollback to old position and apply collision
+      newState.position.copy(oldPosition);
+
+      // Apply damage and crash
+      newState.damage += postMovementCollision.damage;
+      console.log(`POST-MOVEMENT COLLISION: ${postMovementCollision.type} - Damage: ${postMovementCollision.damage}`);
+
+      // Immediate crash
+      newState.isDead = true;
+      newState.isFlying = false;
+      newState.isLanded = false;
+      newState.throttle = 0;
+      newState.enginePower = 0;
+
+      // Add crash velocity
+      if (postMovementCollision.impactNormal) {
+        const impactForce = newState.velocity.length() * 0.3;
+        newState.velocity.copy(postMovementCollision.impactNormal.multiplyScalar(impactForce));
+        newState.velocity.y = Math.min(newState.velocity.y, -3); // Strong downward crash
+      }
+
+      console.log('DRONE DESTROYED: Post-movement collision - entering crash sequence');
+    }
+  }
 
   // ===== GROUND COLLISION AND LANDING =====
   const groundLevel = 0.5; // Ground height
@@ -285,32 +373,53 @@ export const updateDronePosition = (
   if (newState.position.y <= groundLevel) {
     newState.position.y = groundLevel;
 
+    // Check for hard impact damage (only if not already dead)
+    if (!newState.isDead && newState.velocity.y < -5) { // Fast downward velocity
+      const impactDamage = Math.abs(newState.velocity.y) * 6; // Scale damage with impact speed
+      newState.damage += impactDamage;
+      console.log(`GROUND IMPACT: Speed ${Math.abs(newState.velocity.y).toFixed(1)}m/s - Damage: ${impactDamage.toFixed(0)}, Total: ${newState.damage}`);
+
+      if (newState.damage >= DAMAGE_THRESHOLD) {
+        newState.isDead = true;
+        newState.isFlying = false;
+        newState.isLanded = false;
+        console.log('DRONE DESTROYED: Ground impact damage threshold exceeded');
+      }
+    }
+
     // Stop downward movement when hitting ground
     if (newState.velocity.y < 0) {
       newState.velocity.y = 0;
     }
 
-    // FPV Landing conditions: low speed and low throttle
-    const horizontalSpeed = Math.sqrt(newState.velocity.x ** 2 + newState.velocity.z ** 2);
-    const isSlowEnough = horizontalSpeed < 1.5; // Slower landing threshold for FPV
-    const isLowThrottle = newState.throttle < 0.25; // Low throttle
-    const isDescending = newState.velocity.y <= 0;
+    // FPV Landing conditions: low speed and low throttle (only if not dead)
+    if (!newState.isDead) {
+      const horizontalSpeed = Math.sqrt(newState.velocity.x ** 2 + newState.velocity.z ** 2);
+      const isSlowEnough = horizontalSpeed < 1.5; // Slower landing threshold for FPV
+      const isLowThrottle = newState.throttle < 0.25; // Low throttle
+      const isDescending = newState.velocity.y <= 0;
 
-    if (isSlowEnough && isLowThrottle && isDescending) {
-      console.log('FPV LANDING: Touchdown - drone landed safely');
-      newState.isLanded = true;
-      newState.isFlying = false;
+      if (isSlowEnough && isLowThrottle && isDescending) {
+        console.log('FPV LANDING: Touchdown - drone landed safely');
+        newState.isLanded = true;
+        newState.isFlying = false;
 
-      // Stop all movement
+        // Stop all movement
+        newState.velocity.x = 0;
+        newState.velocity.z = 0;
+        newState.velocity.y = 0;
+        newState.throttle = 0;
+        newState.enginePower = 0;
+
+        // Gradually level out the drone when landed
+        newState.angularVelocity.x = -newState.rotation.x * 8; // Faster leveling
+        newState.angularVelocity.z = -newState.rotation.z * 8;
+      }
+    } else {
+      // If dead, just stop all movement on ground
       newState.velocity.x = 0;
       newState.velocity.z = 0;
       newState.velocity.y = 0;
-      newState.throttle = 0;
-      newState.enginePower = 0;
-
-      // Gradually level out the drone when landed
-      newState.angularVelocity.x = -newState.rotation.x * 8; // Faster leveling
-      newState.angularVelocity.z = -newState.rotation.z * 8;
     }
   }
 
@@ -323,19 +432,130 @@ export const updateDronePosition = (
 
 export const checkCollisions = (droneState: DroneState, buildings: Building[]): boolean => {
   const droneRadius = 1; // Approximate drone size
-  
+
   for (const building of buildings) {
     const distance = droneState.position.distanceTo(building.position);
     const minDistance = droneRadius + Math.max(building.size.x, building.size.z) / 2;
-    
-    if (distance < minDistance && 
+
+    if (distance < minDistance &&
         droneState.position.y < building.position.y + building.size.y / 2 &&
         droneState.position.y > building.position.y - building.size.y / 2) {
       return true; // Collision detected
     }
   }
-  
+
   return false;
+};
+
+interface CollisionResult {
+  hasCollision: boolean;
+  damage: number;
+  type: string;
+  correctedPosition?: Vector3;
+  impactNormal?: Vector3;
+}
+
+export const checkCollisionsWithDamage = (
+  droneState: DroneState,
+  buildings: Building[],
+  trees: Tree[]
+): CollisionResult => {
+  const droneRadius = 1; // Approximate drone size
+
+  // Check building collisions
+  for (const building of buildings) {
+    // Calculate closest point on building to drone
+    const buildingMin = new Vector3(
+      building.position.x - building.size.x / 2,
+      building.position.y - building.size.y / 2,
+      building.position.z - building.size.z / 2
+    );
+    const buildingMax = new Vector3(
+      building.position.x + building.size.x / 2,
+      building.position.y + building.size.y / 2,
+      building.position.z + building.size.z / 2
+    );
+
+    // Check if drone is inside or too close to building
+    const closestPoint = new Vector3(
+      Math.max(buildingMin.x, Math.min(droneState.position.x, buildingMax.x)),
+      Math.max(buildingMin.y, Math.min(droneState.position.y, buildingMax.y)),
+      Math.max(buildingMin.z, Math.min(droneState.position.z, buildingMax.z))
+    );
+
+    const distance = droneState.position.distanceTo(closestPoint);
+
+    if (distance < droneRadius) {
+      // Calculate impact normal (direction to push drone away)
+      const impactNormal = droneState.position.clone().sub(closestPoint).normalize();
+      if (impactNormal.length() === 0) {
+        // If drone is exactly at center, push it up
+        impactNormal.set(0, 1, 0);
+      }
+
+      // Calculate corrected position (push drone outside building)
+      const correctedPosition = closestPoint.clone().add(
+        impactNormal.multiplyScalar(droneRadius + 0.1)
+      );
+
+      return {
+        hasCollision: true,
+        damage: COLLISION_DAMAGE.BUILDING,
+        type: 'BUILDING',
+        correctedPosition,
+        impactNormal
+      };
+    }
+  }
+
+  // Check tree collisions
+  for (const tree of trees) {
+    const distance2D = Math.sqrt(
+      (droneState.position.x - tree.position.x) ** 2 +
+      (droneState.position.z - tree.position.z) ** 2
+    );
+
+    // Check if drone is within tree foliage area
+    const foliageCenter = tree.position.y + tree.height / 2 + tree.radius;
+    const verticalDistance = Math.abs(droneState.position.y - foliageCenter);
+
+    if (distance2D < (droneRadius + tree.radius) &&
+        verticalDistance < tree.radius) {
+
+      // Calculate impact normal (direction to push drone away from tree)
+      const impactNormal = new Vector3(
+        droneState.position.x - tree.position.x,
+        0, // Don't push vertically for trees
+        droneState.position.z - tree.position.z
+      ).normalize();
+
+      if (impactNormal.length() === 0) {
+        // If drone is exactly at tree center, push it in a random direction
+        impactNormal.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
+      }
+
+      // Calculate corrected position (push drone outside tree)
+      const correctedPosition = new Vector3(
+        tree.position.x + impactNormal.x * (tree.radius + droneRadius + 0.1),
+        droneState.position.y,
+        tree.position.z + impactNormal.z * (tree.radius + droneRadius + 0.1)
+      );
+
+      return {
+        hasCollision: true,
+        damage: COLLISION_DAMAGE.TREE,
+        type: 'TREE',
+        correctedPosition,
+        impactNormal
+      };
+    }
+  }
+
+  return {
+    hasCollision: false,
+    damage: 0,
+    type: 'NONE'
+  };
 };
 
 export const getRandomSpawnPosition = (buildings: Building[], areaSize: number): Vector3 => {

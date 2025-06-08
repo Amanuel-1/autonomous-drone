@@ -6,8 +6,9 @@ import { Vector3 } from 'three';
 import { Drone } from './Drone';
 import { Environment } from './Environment';
 import { Camera } from './Camera';
-import { DroneState, SimulationControls, CameraSettings } from '../types/simulation';
+import { DroneState, SimulationControls, CameraSettings, DAMAGE_THRESHOLD } from '../types/simulation';
 import { generateBuildings, updateDronePosition, getRandomSpawnPosition } from '../utils/simulation';
+import { defaultTrees } from './Environment';
 
 export const DroneSimulation: React.FC = () => {
   const [droneState, setDroneState] = useState<DroneState>({
@@ -21,7 +22,9 @@ export const DroneSimulation: React.FC = () => {
     battery: 100,
     enginePower: 0,
     cameraTilt: 0, // Camera starts level
-    cameraRotation: 0 // Camera starts facing forward
+    cameraRotation: 0, // Camera starts facing forward
+    damage: 0, // Start with no damage
+    isDead: false // Start alive
   });
 
   const [controls, setControls] = useState<SimulationControls>({
@@ -51,6 +54,7 @@ export const DroneSimulation: React.FC = () => {
 
   const groundSize = 100;
   const buildings = useMemo(() => generateBuildings(20, groundSize), []);
+  const trees = useMemo(() => defaultTrees, []);
 
   // Handle keyboard input - FPV Drone Controls
   useEffect(() => {
@@ -231,7 +235,7 @@ export const DroneSimulation: React.FC = () => {
             position: prevState.position.y
           });
         }
-        return updateDronePosition(prevState, controls, 0.016);
+        return updateDronePosition(prevState, controls, 0.016, buildings, trees);
       });
     }, 16);
 
@@ -251,7 +255,9 @@ export const DroneSimulation: React.FC = () => {
       battery: 100,
       enginePower: 0,
       cameraTilt: 0,
-      cameraRotation: 0
+      cameraRotation: 0,
+      damage: 0,
+      isDead: false
     });
   }, [buildings]);
 
@@ -281,7 +287,7 @@ export const DroneSimulation: React.FC = () => {
         camera={{ position: [20, 20, 20], fov: 60 }}
         gl={{ antialias: true }}
       >
-        <Environment buildings={buildings} groundSize={groundSize} />
+        <Environment buildings={buildings} groundSize={groundSize} trees={trees} />
         <Drone droneState={droneState} />
         <Camera
           dronePosition={droneState.position}
@@ -306,7 +312,12 @@ export const DroneSimulation: React.FC = () => {
           </p>
         </div>
         <div className="mt-4 space-y-2">
-          {droneState.isLanded ? (
+          {droneState.isDead ? (
+            <div className="text-center p-3 bg-red-900 rounded">
+              <p className="text-red-300 font-bold">💀 DRONE DESTROYED</p>
+              <p className="text-xs text-red-400">Press Reset to respawn</p>
+            </div>
+          ) : droneState.isLanded ? (
             <button
               onClick={handleTakeoff}
               className="block w-full px-3 py-2 bg-green-600 hover:bg-green-700 rounded text-sm transition-colors font-bold"
@@ -375,11 +386,25 @@ export const DroneSimulation: React.FC = () => {
           </div>
           <p><strong>Engine:</strong> {(droneState.enginePower * 100).toFixed(0)}%</p>
           <p><strong>Status:</strong> {
+            droneState.isDead ? '💀 CRASHED - Press Reset to respawn' :
             droneState.isLanded ? '🛬 Landed (Press T to takeoff)' :
             droneState.isFlying ? '✈️ Flying' :
             '🚁 Hovering'
           }</p>
           <p><strong>Battery:</strong> 🔋 {droneState.battery}%</p>
+          <p><strong>Health:</strong> {droneState.isDead ? '💀 DESTROYED' : `❤️ ${Math.max(0, DAMAGE_THRESHOLD - droneState.damage)}/${DAMAGE_THRESHOLD}`}</p>
+          <div className="w-full bg-gray-700 rounded-full h-2 mb-1">
+            <div
+              className={`h-2 rounded-full transition-all duration-100 ${
+                droneState.isDead ? 'bg-red-500' :
+                droneState.damage > DAMAGE_THRESHOLD * 0.7 ? 'bg-orange-500' : 'bg-green-500'
+              }`}
+              style={{ width: `${Math.max(0, (DAMAGE_THRESHOLD - droneState.damage) / DAMAGE_THRESHOLD * 100)}%` }}
+            ></div>
+          </div>
+          {droneState.damage > 0 && (
+            <p className="text-red-400"><strong>Damage:</strong> ⚠️ {droneState.damage.toFixed(0)}</p>
+          )}
           <div className="mt-2 text-xs">
             <p><strong>Active Controls:</strong></p>
             <div className="flex flex-wrap gap-1 mt-1">
