@@ -1,14 +1,37 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Vector3 } from 'three';
+import {
+  Bot, Plane, Brain, GraduationCap, Save, FolderOpen, Circle,
+  Rocket, PlaneLanding, Video as CameraIcon, RotateCcw, Video, Square, Trash2,
+  BarChart3, Battery, Heart, Skull, Target, CheckCircle, Clock,
+  Trophy, ArrowUp, ArrowDown, Pause, AlertTriangle,
+  MapPin, Activity, Settings, Monitor, Radar
+} from 'lucide-react';
 import { Drone } from './Drone';
 import { Environment } from './Environment';
 import { Camera } from './Camera';
-import { DroneState, SimulationControls, CameraSettings, DAMAGE_THRESHOLD, LiDARReading } from '../types/simulation';
-import { generateBuildings, updateDronePosition, getRandomSpawnPosition } from '../utils/simulation';
+import { MissionMarkers } from './MissionMarkers';
+import { DroneState, SimulationControls, CameraSettings, DAMAGE_THRESHOLD, LiDARReading, TrainingObstacle } from '../types/simulation';
+import { generateBuildings, generateSkyscrapers, generateDenseTrees, updateDronePosition } from '../utils/simulation';
 import { defaultTrees } from './Environment';
+import { ReinforcementLearning } from '../ai/ReinforcementLearning';
+import { TrainingEnvironment } from '../ai/TrainingEnvironment';
+import { ImitationLearning } from '../ai/ImitationLearning';
+import { DroneAction, TrainingState } from '../types/ai';
+import {
+  actionToControls,
+  getDefaultNetworkConfig,
+  getDefaultTrainingConfig,
+  getDefaultRewardConfig,
+  getActionName,
+  generateMissionCoordinates,
+  getDefaultTrainingEnvironmentConfig
+} from '../utils/aiHelpers';
+import { TrainingObstacleGenerator } from '../utils/trainingObstacles';
+import { TrainingObstacles, WindZoneEffects, ObstacleLighting } from './TrainingObstacles';
 
 export const DroneSimulation: React.FC = () => {
   const [droneState, setDroneState] = useState<DroneState>({
@@ -26,7 +49,18 @@ export const DroneSimulation: React.FC = () => {
     damage: 0, // Start with no damage
     isDead: false, // Start alive
     lidarReadings: [], // Start with empty LiDAR readings
-    lidarEnabled: true // Start with LiDAR enabled
+    lidarEnabled: true, // Start with LiDAR enabled
+    // AI system
+    isAutonomous: false, // Start in manual mode
+    lastReward: 0,
+    totalReward: 0,
+    episodeStep: 0,
+    // Mission system
+    startPosition: new Vector3(0, 0.5, 0),
+    targetPosition: new Vector3(20, 0.5, 20),
+    missionStarted: false,
+    missionCompleted: false,
+    distanceToTarget: 0
   });
 
   const [controls, setControls] = useState<SimulationControls>({
@@ -54,9 +88,70 @@ export const DroneSimulation: React.FC = () => {
     angle: 0
   });
 
-  const groundSize = 100;
-  const buildings = useMemo(() => generateBuildings(20, groundSize), []);
+  const groundSize = 200; // Expanded world size
+  const buildings = useMemo(() => generateBuildings(15, groundSize), []); // Regular buildings
+  const skyscrapers = useMemo(() => generateSkyscrapers(8, groundSize), []); // Add skyscrapers
   const trees = useMemo(() => defaultTrees, []);
+  const denseTrees = useMemo(() => generateDenseTrees(60, groundSize), []); // Dense forest areas
+
+  // Training Environment
+  const [trainingConfig] = useState(() => getDefaultTrainingEnvironmentConfig());
+  const [trainingObstacles, setTrainingObstacles] = useState<TrainingObstacle[]>([]);
+
+  // Initialize training obstacles
+  useEffect(() => {
+    const generator = new TrainingObstacleGenerator(trainingConfig);
+    const obstacles = generator.generateTrainingObstacles();
+    setTrainingObstacles(obstacles);
+    console.log(`🏗️ Generated ${obstacles.length} training obstacles for ${trainingConfig.difficultyLevel} difficulty`);
+  }, [trainingConfig]);
+
+  // AI Brain initialization
+  const rlAgent = useRef<ReinforcementLearning | null>(null);
+  const trainingEnv = useRef<TrainingEnvironment | null>(null);
+  const imitationLearning = useRef<ImitationLearning | null>(null);
+  const [trainingState, setTrainingState] = useState<TrainingState>({
+    isTraining: false,
+    currentEpisode: 0,
+    currentStep: 0,
+    totalSteps: 0,
+    bestReward: -Infinity,
+    recentRewards: [],
+    metrics: [],
+    modelSaved: false,
+    lastSaveTime: 0
+  });
+  const [currentAction, setCurrentAction] = useState<DroneAction | null>(null);
+  const [collisionCount, setCollisionCount] = useState(0);
+  const [respawnCountdown, setRespawnCountdown] = useState<number | null>(null);
+  const [isRecordingDemo, setIsRecordingDemo] = useState(false);
+  const [imitationStats, setImitationStats] = useState({
+    enabled: false,
+    recording: false,
+    totalDemonstrations: 0,
+    averageQuality: 0,
+    currentRecordingLength: 0
+  });
+  const [trainingDiagnostics, setTrainingDiagnostics] = useState({
+    successRate: 0,
+    averageEpisodeLength: 0,
+    averageReward: 0,
+    explorationRate: 0,
+    recentEpisodes: [] as number[]
+  });
+
+  // Initialize AI brain
+  useEffect(() => {
+    const networkConfig = getDefaultNetworkConfig();
+    const trainingConfig = getDefaultTrainingConfig();
+    const rewardConfig = getDefaultRewardConfig();
+
+    rlAgent.current = new ReinforcementLearning(networkConfig, trainingConfig);
+    trainingEnv.current = new TrainingEnvironment(rlAgent.current, rewardConfig);
+    imitationLearning.current = new ImitationLearning();
+
+    console.log('[AI] Brain initialized with neural network and imitation learning');
+  }, []);
 
   // Handle keyboard input - FPV Drone Controls
   useEffect(() => {
@@ -225,45 +320,260 @@ export const DroneSimulation: React.FC = () => {
     };
   }, []);
 
-  // Update drone position based on controls
+  // Update drone position based on controls (manual or AI)
   useEffect(() => {
     const interval = setInterval(() => {
       setDroneState(prevState => {
+        let activeControls = controls;
+        let aiAction: DroneAction | null = null;
+        let reward = 0;
+
+        // Combine all obstacles for collision detection and AI training
+        const allBuildings = [...buildings, ...skyscrapers];
+        const allTrees = [...trees, ...denseTrees];
+
+        // AI Control Logic
+        if (prevState.isAutonomous && trainingEnv.current && rlAgent.current) {
+          try {
+            // Get AI decision (use all obstacles for training)
+            const stepResult = trainingEnv.current.step(prevState, allBuildings, allTrees);
+            aiAction = stepResult.action;
+            reward = stepResult.reward;
+
+            // Convert AI action to controls
+            const aiControls = actionToControls(aiAction);
+            activeControls = { ...controls, ...aiControls };
+
+            // Update current action for display
+            setCurrentAction(aiAction);
+
+            // Continuous training during flight (every 10 steps)
+            if (trainingState.isTraining && prevState.episodeStep % 10 === 0 && prevState.episodeStep > 0) {
+              const loss = trainingEnv.current.train();
+              if (prevState.episodeStep % 50 === 0) {
+                console.log(`[AI] Continuous training step ${prevState.episodeStep}. Loss: ${loss.toFixed(4)}`);
+              }
+            }
+
+            // Check if episode should end
+            if (stepResult.done) {
+              // End episode and start new one
+              trainingEnv.current.endEpisode(prevState.totalReward + reward, collisionCount);
+
+              // Start new episode, preserving exploration if drone died (will respawn)
+              // but not if mission was completed (new mission needed)
+              const preserveExploration = prevState.isDead && !prevState.missionCompleted;
+              trainingEnv.current.startEpisode(preserveExploration);
+
+              if (!preserveExploration) {
+                setCollisionCount(0);
+              }
+
+              // If mission was completed, generate new mission coordinates
+              if (prevState.missionCompleted) {
+                console.log('🎯 Mission completed! Generating new mission with reset rewards...');
+                setTimeout(() => {
+                  resetSimulation(true); // This will generate new mission coordinates and reset rewards
+                }, 2000); // 2 second delay to show success
+              }
+
+              // Update training state
+              setTrainingState(trainingEnv.current.getTrainingState());
+
+              // Train the network more frequently
+              if (trainingState.isTraining) {
+                // Train multiple times per episode end for better learning
+                let totalLoss = 0;
+                const trainingSteps = 5; // Multiple training steps
+                for (let i = 0; i < trainingSteps; i++) {
+                  const loss = trainingEnv.current.train();
+                  totalLoss += loss;
+                }
+
+                // Add imitation learning if demonstrations are available
+                if (imitationLearning.current && imitationStats.totalDemonstrations > 0 && rlAgent.current) {
+                  const imitationLoss = imitationLearning.current.trainFromDemonstrations(
+                    rlAgent.current.getMainNetwork(), 16
+                  );
+                  if (imitationLoss > 0) {
+                    console.log(`👨‍🏫 Imitation learning loss: ${imitationLoss.toFixed(4)}`);
+                  }
+                }
+
+                const avgLoss = totalLoss / trainingSteps;
+
+                // Enhanced logging for diagnostics
+                const currentEpsilon = rlAgent.current?.getCurrentEpsilon() || 0;
+                const bufferStats = rlAgent.current?.getBufferStats();
+
+                console.log(`[AI] Episode ${trainingState.currentEpisode} completed:`);
+                console.log(`   [STATS] Reward: ${prevState.totalReward.toFixed(1)} | Steps: ${prevState.episodeStep}`);
+                console.log(`   [TARGET] Distance: ${prevState.distanceToTarget.toFixed(1)}m | Success: ${prevState.missionCompleted}`);
+                console.log(`   [TRAINING] Loss: ${avgLoss.toFixed(4)} | ε: ${currentEpsilon.toFixed(3)} | Buffer: ${bufferStats?.size || 0}`);
+                console.log(`   [COLLISION] Count: ${collisionCount} | Altitude: ${prevState.position.y.toFixed(1)}m`);
+              }
+            }
+          } catch (error) {
+            console.error('AI control error:', error);
+            // Fall back to manual controls
+          }
+        }
+
         // Debug log for takeoff
-        if (controls.takeoff) {
+        if (activeControls.takeoff) {
           console.log('Takeoff control active, drone state:', {
             isLanded: prevState.isLanded,
             isFlying: prevState.isFlying,
             position: prevState.position.y
           });
         }
-        return updateDronePosition(prevState, controls, 0.016, buildings, trees);
+
+        // Update drone physics
+        const newState = updateDronePosition(prevState, activeControls, 0.016, allBuildings, allTrees, trainingObstacles);
+
+        // Update mission state
+        newState.distanceToTarget = newState.position.distanceTo(newState.targetPosition);
+
+        // Check for mission completion
+        const isNearTarget = newState.distanceToTarget <= 3;
+        if (isNearTarget && newState.isLanded && !newState.missionCompleted) {
+          newState.missionCompleted = true;
+          console.log('🎯 MISSION COMPLETED! Landing successful!');
+        }
+
+        // Start mission when drone takes off
+        if (!newState.missionStarted && newState.isFlying) {
+          newState.missionStarted = true;
+          console.log('🚀 Mission started! Navigate to target position.');
+        }
+
+        // Record manual demonstrations for imitation learning
+        if (!prevState.isAutonomous && imitationLearning.current && imitationStats.recording) {
+          const stateVector = trainingEnv.current?.droneStateToVector(newState) || [];
+          imitationLearning.current.recordStep(newState, activeControls, stateVector);
+
+          // Update imitation stats
+          setImitationStats(imitationLearning.current.getStats());
+        }
+
+        // Update AI-related state
+        if (prevState.isAutonomous) {
+          newState.lastReward = reward;
+          newState.totalReward = prevState.totalReward + reward;
+          newState.episodeStep = prevState.episodeStep + 1;
+
+          // Check for reward-based damage
+          if (trainingEnv.current) {
+            const damageCheck = trainingEnv.current.checkRewardBasedDamage(newState.totalReward);
+
+            if (damageCheck.shouldTakeDamage) {
+              newState.damage += damageCheck.damageAmount;
+              console.log(`💔 Reward-based damage: +${damageCheck.damageAmount} (Total: ${newState.damage})`);
+
+              // Check if drone should die from reward damage
+              if (damageCheck.shouldDie || newState.damage >= DAMAGE_THRESHOLD) {
+                newState.isDead = true;
+                newState.isFlying = false;
+                newState.isLanded = false;
+                newState.throttle = 0;
+                newState.enginePower = 0;
+                console.log(`💀 Drone killed by negative rewards! Total reward: ${newState.totalReward.toFixed(1)}`);
+              }
+            }
+          }
+
+          // Track collisions for training
+          if (newState.damage > prevState.damage) {
+            setCollisionCount(prev => prev + 1);
+          }
+
+          // Auto-respawn when drone is destroyed in autonomous mode
+          if (newState.isDead && !prevState.isDead) {
+            console.log('💀 Drone destroyed! Auto-respawning with new mission...');
+
+            // Start countdown
+            let countdown = 3;
+            setRespawnCountdown(countdown);
+
+            const countdownInterval = setInterval(() => {
+              countdown--;
+              setRespawnCountdown(countdown);
+
+              if (countdown <= 0) {
+                clearInterval(countdownInterval);
+                setRespawnCountdown(null);
+
+                // Respawn with preserved AI state but reset rewards and new mission
+                resetSimulation(true);
+
+                // Start new episode in training environment
+                if (trainingEnv.current) {
+                  trainingEnv.current.startEpisode(false); // Fresh start with new mission
+                }
+
+                // Automatically take off after respawn if in autonomous mode
+                setTimeout(() => {
+                  setControls(prev => ({ ...prev, takeoff: true }));
+                  setTimeout(() => {
+                    setControls(prev => ({ ...prev, takeoff: false }));
+                  }, 100);
+                }, 500);
+              }
+            }, 1000); // 1 second intervals
+          }
+        }
+
+        return newState;
       });
     }, 16);
 
     return () => clearInterval(interval);
-  }, [controls]);
+  }, [controls, buildings, trees, collisionCount, trainingState.isTraining]);
 
-  const resetSimulation = useCallback(() => {
-    const newPosition = getRandomSpawnPosition(buildings, groundSize);
-    setDroneState({
-      position: newPosition,
-      rotation: new Vector3(0, 0, 0),
-      velocity: new Vector3(0, 0, 0),
-      angularVelocity: new Vector3(0, 0, 0),
-      isFlying: false,
-      isLanded: true,
-      throttle: 0,
-      battery: 100,
-      enginePower: 0,
-      cameraTilt: 0,
-      cameraRotation: 0,
-      damage: 0,
-      isDead: false,
-      lidarReadings: [],
-      lidarEnabled: true
+  const resetSimulation = useCallback((preserveAIState: boolean = false) => {
+    // Generate new mission coordinates
+    const mission = generateMissionCoordinates(groundSize, 15);
+
+    setDroneState(prevState => {
+      const newDistanceToTarget = mission.start.distanceTo(mission.target);
+
+      return {
+        position: mission.start.clone(),
+        rotation: new Vector3(0, 0, 0),
+        velocity: new Vector3(0, 0, 0),
+        angularVelocity: new Vector3(0, 0, 0),
+        isFlying: false,
+        isLanded: true,
+        throttle: 0,
+        battery: 100,
+        enginePower: 0,
+        cameraTilt: 0,
+        cameraRotation: 0,
+        damage: 0,
+        isDead: false,
+        lidarReadings: [],
+        lidarEnabled: true,
+        // AI system - preserve state if requested (for auto-respawn)
+        isAutonomous: preserveAIState ? prevState.isAutonomous : false,
+        lastReward: 0,
+        totalReward: 0, // Always reset total reward for new mission
+        episodeStep: 0, // Always reset episode step for new mission
+        // Mission system - always generate new mission
+        startPosition: mission.start.clone(),
+        targetPosition: mission.target.clone(),
+        missionStarted: false,
+        missionCompleted: false,
+        distanceToTarget: newDistanceToTarget
+      };
     });
-  }, [buildings]);
+
+    // Reset collision count for new spawn
+    if (!preserveAIState) {
+      setCollisionCount(0);
+    }
+
+    console.log(`🎯 New mission generated: Start(${mission.start.x.toFixed(1)}, ${mission.start.z.toFixed(1)}) → Target(${mission.target.x.toFixed(1)}, ${mission.target.z.toFixed(1)})`);
+  }, [buildings, groundSize]);
 
   const toggleCameraFollow = useCallback(() => {
     setCameraSettings(prev => ({ ...prev, followDrone: !prev.followDrone }));
@@ -292,6 +602,156 @@ export const DroneSimulation: React.FC = () => {
     }, 100);
   }, []);
 
+  // AI Control Functions
+  const toggleAutonomousMode = useCallback(() => {
+    setDroneState(prev => {
+      const newAutonomous = !prev.isAutonomous;
+
+      if (newAutonomous && trainingEnv.current) {
+        // Start new episode when entering autonomous mode
+        trainingEnv.current.startEpisode(false); // Fresh start when manually enabling
+        setCollisionCount(0);
+        console.log('🤖 Autonomous mode ENABLED - AI taking control');
+      } else {
+        console.log('👤 Manual mode ENABLED - Human taking control');
+      }
+
+      return {
+        ...prev,
+        isAutonomous: newAutonomous,
+        totalReward: 0, // Reset rewards when toggling mode
+        lastReward: 0,
+        episodeStep: 0
+      };
+    });
+  }, []);
+
+  const toggleTraining = useCallback(() => {
+    if (!trainingEnv.current) return;
+
+    setTrainingState(prev => {
+      const newTraining = !prev.isTraining;
+
+      if (newTraining) {
+        trainingEnv.current!.startTraining();
+        console.log('[TRAINING] Mode ENABLED - AI learning from experience');
+      } else {
+        trainingEnv.current!.stopTraining();
+        console.log('[TRAINING] Mode DISABLED - AI using current knowledge');
+      }
+
+      return { ...prev, isTraining: newTraining };
+    });
+  }, []);
+
+  const saveAIModel = useCallback(() => {
+    if (!trainingEnv.current) return;
+
+    try {
+      const modelData = trainingEnv.current.saveModel();
+      const blob = new Blob([modelData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `drone-ai-model-${Date.now()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      console.log('[SAVE] AI model saved successfully');
+      setTrainingState(prev => ({ ...prev, modelSaved: true, lastSaveTime: Date.now() }));
+    } catch (error) {
+      console.error('Failed to save AI model:', error);
+    }
+  }, []);
+
+  const loadAIModel = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !trainingEnv.current) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const modelData = e.target?.result as string;
+        trainingEnv.current!.loadModel(modelData);
+        setTrainingState(trainingEnv.current!.getTrainingState());
+        console.log('[LOAD] AI model loaded successfully');
+      } catch (error) {
+        console.error('Failed to load AI model:', error);
+      }
+    };
+    reader.readAsText(file);
+  }, []);
+
+  // Imitation Learning Functions
+  const startRecording = useCallback(() => {
+    if (!imitationLearning.current || droneState.isAutonomous) return;
+
+    imitationLearning.current.startRecording();
+    setIsRecordingDemo(true);
+    setImitationStats(imitationLearning.current.getStats());
+    console.log('🎥 Started recording your manual flight for AI learning');
+  }, [droneState.isAutonomous]);
+
+  const stopRecording = useCallback(() => {
+    if (!imitationLearning.current || !isRecordingDemo) return;
+
+    const missionSuccess = droneState.missionCompleted;
+    const totalReward = droneState.totalReward;
+
+    imitationLearning.current.stopRecording(missionSuccess, totalReward, collisionCount);
+    setIsRecordingDemo(false);
+    setImitationStats(imitationLearning.current.getStats());
+  }, [droneState.missionCompleted, droneState.totalReward, collisionCount, isRecordingDemo]);
+
+  const clearDemonstrations = useCallback(() => {
+    if (!imitationLearning.current) return;
+
+    imitationLearning.current.clearDemonstrations();
+    setImitationStats(imitationLearning.current.getStats());
+    console.log('🗑️ Cleared all recorded demonstrations');
+  }, []);
+
+  const saveDemonstrations = useCallback(() => {
+    if (!imitationLearning.current) return;
+
+    try {
+      const demoData = imitationLearning.current.exportDemonstrations();
+      const blob = new Blob([demoData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `drone-demonstrations-${Date.now()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      console.log('[SAVE] Demonstrations saved successfully');
+    } catch (error) {
+      console.error('Failed to save demonstrations:', error);
+    }
+  }, []);
+
+  const loadDemonstrations = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !imitationLearning.current) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const demoData = e.target?.result as string;
+        imitationLearning.current!.importDemonstrations(demoData);
+        setImitationStats(imitationLearning.current!.getStats());
+        console.log('[LOAD] Demonstrations loaded successfully');
+      } catch (error) {
+        console.error('Failed to load demonstrations:', error);
+      }
+    };
+    reader.readAsText(file);
+  }, []);
+
   return (
     <div className="w-full h-screen relative">
       <Canvas
@@ -299,8 +759,25 @@ export const DroneSimulation: React.FC = () => {
         camera={{ position: [20, 20, 20], fov: 60 }}
         gl={{ antialias: true }}
       >
-        <Environment buildings={buildings} groundSize={groundSize} trees={trees} />
+        <Environment
+          buildings={buildings}
+          skyscrapers={skyscrapers}
+          denseTrees={denseTrees}
+          groundSize={groundSize}
+          trees={trees}
+        />
+
+        {/* Training Obstacles */}
+        <TrainingObstacles obstacles={trainingObstacles} />
+        <WindZoneEffects obstacles={trainingObstacles} />
+        <ObstacleLighting obstacles={trainingObstacles} />
+
         <Drone droneState={droneState} onLiDARUpdate={handleLiDARUpdate} />
+        <MissionMarkers
+          startPosition={droneState.startPosition}
+          targetPosition={droneState.targetPosition}
+          missionCompleted={droneState.missionCompleted}
+        />
         <Camera
           dronePosition={droneState.position}
           droneRotation={droneState.rotation}
@@ -309,184 +786,516 @@ export const DroneSimulation: React.FC = () => {
       </Canvas>
 
       {/* UI Controls */}
-      <div className="absolute top-4 left-4 bg-black bg-opacity-80 text-white p-4 rounded-lg max-w-xs">
-        <h3 className="text-lg font-bold mb-2">🚁 Drone Controls</h3>
-        <div className="text-sm space-y-1">
-          <p><strong>🚁 FPV DRONE CONTROLS:</strong></p>
-          <p><strong>🏃 MOVEMENT:</strong> <span className="text-blue-300">Arrow Keys</span> (↑↓←→)</p>
-          <p><strong>🚀 ALTITUDE:</strong> <span className="text-green-300">Shift + ↑</span> / <span className="text-red-300">Shift + ↓</span></p>
-          <p><strong>🔄 ROTATION:</strong> <span className="text-yellow-300">Shift + ←/→</span></p>
-          <p><strong>🎯 HOVER:</strong> <span className="text-purple-300">H</span> (auto-level)</p>
-          <p><strong>📹 CAMERA:</strong> I/K (tilt), J/O (rotate)</p>
-          <p><strong>🛫 Takeoff:</strong> T | <strong>🛬 Land:</strong> L</p>
-          <p><strong>🔵 LiDAR:</strong> Toggle in controls panel</p>
-          <p className="text-yellow-300 text-xs mt-2">
-            💡 Realistic FPV physics! LiDAR shows 3D distance sensing with blue dots!
+      <div className="absolute top-2 left-2 bg-gray-900 bg-opacity-95 text-gray-100 p-2 rounded text-xs max-w-xs border border-gray-700">
+        <h3 className="text-sm font-bold mb-1 flex items-center gap-1">
+          {droneState.isAutonomous ? (
+            <>
+              <Bot size={14} />
+              AI Pilot
+            </>
+          ) : (
+            <>
+              <Plane size={14} />
+              Manual Controls
+            </>
+          )}
+          {isRecordingDemo && (
+            <span className="text-red-400 ml-1 flex items-center gap-1">
+              <Circle size={8} className="fill-current" />
+              REC
+            </span>
+          )}
+        </h3>
+        <div className="text-xs space-y-0.5">
+          <p className="flex items-center gap-1">
+            <Plane size={12} />
+            <strong>CONTROLS:</strong>
           </p>
-          <p className="text-cyan-300 text-xs">
-            🔵 Cyan rays = horizontal | 🟢 Green rays = vertical
-          </p>
+          <p><strong>Move:</strong> <span className="text-gray-300">↑↓←→</span></p>
+          <p><strong>Alt:</strong> <span className="text-gray-300">Shift+↑↓</span></p>
+          <p><strong>Rot:</strong> <span className="text-gray-300">Shift+←→</span></p>
+          <p><strong>Hover:</strong> <span className="text-gray-300">H</span></p>
+          <p><strong>Cam:</strong> I/K/J/O</p>
+          <p><strong>T/O:</strong> T | <strong>Land:</strong> L</p>
         </div>
-        <div className="mt-4 space-y-2">
+        <div className="mt-2 space-y-1">
           {droneState.isDead ? (
-            <div className="text-center p-3 bg-red-900 rounded">
-              <p className="text-red-300 font-bold">💀 DRONE DESTROYED</p>
-              <p className="text-xs text-red-400">Press Reset to respawn</p>
+            <div className="text-center p-2 bg-gray-800 rounded border border-gray-600">
+              <p className="text-gray-300 font-bold text-xs flex items-center justify-center gap-1">
+                <Skull size={12} />
+                DESTROYED
+              </p>
+              {droneState.isAutonomous && respawnCountdown !== null ? (
+                <p className="text-gray-400 font-bold text-sm flex items-center justify-center gap-1">
+                  <RotateCcw size={12} />
+                  {respawnCountdown}s
+                </p>
+              ) : droneState.isAutonomous ? (
+                <p className="text-gray-400 text-xs">Auto-respawning...</p>
+              ) : (
+                <p className="text-xs text-gray-400">Reset to respawn</p>
+              )}
             </div>
           ) : droneState.isLanded ? (
             <button
               onClick={handleTakeoff}
-              className="block w-full px-3 py-2 bg-green-600 hover:bg-green-700 rounded text-sm transition-colors font-bold"
+              className="w-full px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs transition-colors font-bold flex items-center justify-center gap-1"
             >
-              🚀 TAKEOFF
+              <Rocket size={12} />
+              TAKEOFF
             </button>
           ) : (
             <>
-              <div className="flex gap-2">
+              <div className="flex gap-1">
                 <button
                   onMouseDown={() => setControls(prev => ({ ...prev, throttleUp: true }))}
                   onMouseUp={() => setControls(prev => ({ ...prev, throttleUp: false }))}
                   onMouseLeave={() => setControls(prev => ({ ...prev, throttleUp: false }))}
-                  className="flex-1 px-3 py-2 bg-green-600 hover:bg-green-700 rounded text-sm transition-colors font-bold"
+                  className="flex-1 px-1 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs transition-colors flex items-center justify-center gap-1"
                 >
-                  ⬆️ THROTTLE UP
+                  <ArrowUp size={12} />
+                  UP
                 </button>
                 <button
                   onMouseDown={() => setControls(prev => ({ ...prev, throttleDown: true }))}
                   onMouseUp={() => setControls(prev => ({ ...prev, throttleDown: false }))}
                   onMouseLeave={() => setControls(prev => ({ ...prev, throttleDown: false }))}
-                  className="flex-1 px-3 py-2 bg-red-600 hover:bg-red-700 rounded text-sm transition-colors font-bold"
+                  className="flex-1 px-1 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs transition-colors flex items-center justify-center gap-1"
                 >
-                  ⬇️ THROTTLE DOWN
+                  <ArrowDown size={12} />
+                  DOWN
                 </button>
               </div>
               <button
                 onClick={handleLand}
-                className="block w-full px-3 py-2 bg-orange-600 hover:bg-orange-700 rounded text-sm transition-colors font-bold"
+                className="w-full px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs transition-colors flex items-center justify-center gap-1"
               >
-                🛬 LAND
+                <PlaneLanding size={12} />
+                LAND
               </button>
             </>
           )}
           <button
             onClick={toggleCameraFollow}
-            className="block w-full px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm transition-colors"
+            className="w-full px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs transition-colors flex items-center justify-center gap-1"
           >
-            📹 {cameraSettings.followDrone ? 'Free Camera' : 'Follow Drone'}
+            <CameraIcon size={12} />
+            {cameraSettings.followDrone ? 'Free' : 'Follow'}
           </button>
           <button
             onClick={toggleLiDAR}
-            className={`block w-full px-3 py-1 rounded text-sm transition-colors ${
+            className={`w-full px-2 py-1 rounded text-xs transition-colors flex items-center justify-center gap-1 ${
               droneState.lidarEnabled
-                ? 'bg-cyan-600 hover:bg-cyan-700'
-                : 'bg-gray-600 hover:bg-gray-700'
+                ? 'bg-gray-700 hover:bg-gray-600'
+                : 'bg-gray-800 hover:bg-gray-700'
             }`}
           >
-            🔵 LiDAR {droneState.lidarEnabled ? 'ON' : 'OFF'}
+            <Radar size={12} />
+            LiDAR {droneState.lidarEnabled ? 'ON' : 'OFF'}
           </button>
           <button
-            onClick={resetSimulation}
-            className="block w-full px-3 py-1 bg-gray-600 hover:bg-gray-700 rounded text-sm transition-colors"
+            onClick={() => resetSimulation(false)}
+            className="w-full px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs transition-colors flex items-center justify-center gap-1"
           >
-            🔄 Reset Position
+            <RotateCcw size={12} />
+            Reset
           </button>
+
+          {/* AI Controls */}
+          <div className="mt-2 pt-2 border-t border-gray-600">
+            <p className="text-xs font-bold text-gray-300 mb-1 flex items-center gap-1">
+              <Brain size={12} />
+              AI
+            </p>
+            <button
+              onClick={toggleAutonomousMode}
+              className={`w-full px-2 py-1 rounded text-xs transition-colors font-bold flex items-center justify-center gap-1 ${
+                droneState.isAutonomous
+                  ? 'bg-gray-700 hover:bg-gray-600'
+                  : 'bg-gray-800 hover:bg-gray-700'
+              }`}
+            >
+              {droneState.isAutonomous ? (
+                <>
+                  <Bot size={12} />
+                  AI
+                </>
+              ) : (
+                <>
+                  <Settings size={12} />
+                  MANUAL
+                </>
+              )}
+            </button>
+
+            {/* Manual Mode - Imitation Learning */}
+            {!droneState.isAutonomous && (
+              <>
+                <button
+                  onClick={isRecordingDemo ? stopRecording : startRecording}
+                  className={`w-full px-2 py-1 mt-1 rounded text-xs transition-colors font-bold flex items-center justify-center gap-1 ${
+                    isRecordingDemo
+                      ? 'bg-gray-800 hover:bg-gray-700'
+                      : 'bg-gray-700 hover:bg-gray-600'
+                  }`}
+                >
+                  {isRecordingDemo ? (
+                    <>
+                      <Square size={12} />
+                      STOP REC
+                    </>
+                  ) : (
+                    <>
+                      <Video size={12} />
+                      RECORD
+                    </>
+                  )}
+                </button>
+
+                {imitationStats.totalDemonstrations > 0 && (
+                  <div className="flex gap-1 mt-1">
+                    <button
+                      onClick={saveDemonstrations}
+                      className="flex-1 px-1 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs transition-colors flex items-center justify-center"
+                    >
+                      <Save size={12} />
+                    </button>
+                    <button
+                      onClick={clearDemonstrations}
+                      className="flex-1 px-1 py-1 bg-gray-800 hover:bg-gray-700 rounded text-xs transition-colors flex items-center justify-center"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                )}
+
+                <label className="w-full px-2 py-1 mt-1 bg-gray-700 hover:bg-gray-600 rounded text-xs transition-colors cursor-pointer flex items-center justify-center gap-1">
+                  <FolderOpen size={12} />
+                  Load Demos
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={loadDemonstrations}
+                    className="hidden"
+                  />
+                </label>
+              </>
+            )}
+
+            {/* Autonomous Mode - AI Controls */}
+            {droneState.isAutonomous && (
+              <>
+                <button
+                  onClick={toggleTraining}
+                  className={`w-full px-2 py-1 mt-1 rounded text-xs transition-colors flex items-center justify-center gap-1 ${
+                    trainingState.isTraining
+                      ? 'bg-gray-700 hover:bg-gray-600'
+                      : 'bg-gray-800 hover:bg-gray-700'
+                  }`}
+                >
+                  {trainingState.isTraining ? (
+                    <>
+                      <GraduationCap size={12} />
+                      LEARN
+                    </>
+                  ) : (
+                    <>
+                      <Brain size={12} />
+                      THINK
+                    </>
+                  )}
+                </button>
+
+                <div className="flex gap-1 mt-1">
+                  <button
+                    onClick={saveAIModel}
+                    className="flex-1 px-1 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs transition-colors flex items-center justify-center"
+                  >
+                    <Save size={12} />
+                  </button>
+                  <label className="flex-1 px-1 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs transition-colors cursor-pointer flex items-center justify-center">
+                    <FolderOpen size={12} />
+                    <input
+                      type="file"
+                      accept=".json"
+                      onChange={loadAIModel}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Drone Status */}
-      <div className="absolute top-4 right-4 bg-black bg-opacity-80 text-white p-4 rounded-lg">
-        <h3 className="text-lg font-bold mb-2">📊 Drone Status</h3>
-        <div className="text-sm space-y-1">
-          <p><strong>Position:</strong></p>
-          <p>X: {droneState.position.x.toFixed(1)}m</p>
-          <p>Y: {droneState.position.y.toFixed(1)}m</p>
-          <p>Z: {droneState.position.z.toFixed(1)}m</p>
-          <p><strong>Velocity:</strong></p>
-          <p>Speed: {droneState.velocity.length().toFixed(1)}m/s</p>
+      <div className="absolute top-2 right-2 bg-gray-900 bg-opacity-95 text-gray-100 p-2 rounded text-xs border border-gray-700">
+        <h3 className="text-sm font-bold mb-1 flex items-center gap-1">
+          <BarChart3 size={14} />
+          Status
+        </h3>
+        <div className="text-xs space-y-0.5">
+          <p><strong>Pos:</strong> ({droneState.position.x.toFixed(1)}, {droneState.position.y.toFixed(1)}, {droneState.position.z.toFixed(1)})</p>
+          <p><strong>Speed:</strong> {droneState.velocity.length().toFixed(1)}m/s</p>
           <p><strong>Throttle:</strong> {(droneState.throttle * 100).toFixed(0)}%</p>
-          <div className="w-full bg-gray-700 rounded-full h-2 mb-1">
+          <div className="w-full bg-gray-700 rounded-full h-1 mb-1">
             <div
-              className="bg-green-500 h-2 rounded-full transition-all duration-100"
+              className="bg-gray-500 h-1 rounded-full transition-all duration-100"
               style={{ width: `${droneState.throttle * 100}%` }}
             ></div>
           </div>
-          <p><strong>Engine:</strong> {(droneState.enginePower * 100).toFixed(0)}%</p>
-          <p><strong>Status:</strong> {
-            droneState.isDead ? '💀 CRASHED - Press Reset to respawn' :
-            droneState.isLanded ? '🛬 Landed (Press T to takeoff)' :
-            droneState.isFlying ? '✈️ Flying' :
-            '🚁 Hovering'
-          }</p>
-          <p><strong>Battery:</strong> 🔋 {droneState.battery}%</p>
-          <p><strong>Health:</strong> {droneState.isDead ? '💀 DESTROYED' : `❤️ ${Math.max(0, DAMAGE_THRESHOLD - droneState.damage)}/${DAMAGE_THRESHOLD}`}</p>
-          <div className="w-full bg-gray-700 rounded-full h-2 mb-1">
+          <p className="flex items-center gap-1">
+            <strong>Status:</strong>
+            {droneState.isDead ? (
+              <>
+                <Skull size={12} />
+                CRASHED
+              </>
+            ) : droneState.isLanded ? (
+              <>
+                <PlaneLanding size={12} />
+                Landed
+              </>
+            ) : droneState.isFlying ? (
+              <>
+                <Plane size={12} />
+                Flying
+              </>
+            ) : (
+              <>
+                <Pause size={12} />
+                Hovering
+              </>
+            )}
+          </p>
+          <p className="flex items-center gap-1">
+            <strong>Battery:</strong>
+            <Battery size={12} />
+            {droneState.battery}%
+          </p>
+          <p className="flex items-center gap-1">
+            <strong>Health:</strong>
+            {droneState.isDead ? (
+              <>
+                <Skull size={12} />
+                0
+              </>
+            ) : (
+              <>
+                <Heart size={12} />
+                {Math.max(0, DAMAGE_THRESHOLD - droneState.damage)}/{DAMAGE_THRESHOLD}
+              </>
+            )}
+          </p>
+
+          {/* Mission Information */}
+          <div className="mt-2 pt-2 border-t border-gray-600">
+            <p className="flex items-center gap-1">
+              <Target size={12} />
+              <strong>Mission:</strong>
+              <span className={`flex items-center gap-1 ${droneState.missionCompleted ? 'text-gray-300' : droneState.missionStarted ? 'text-gray-400' : 'text-gray-500'}`}>
+                {droneState.missionCompleted ? (
+                  <>
+                    <CheckCircle size={10} />
+                    Complete
+                  </>
+                ) : droneState.missionStarted ? (
+                  <>
+                    <Rocket size={10} />
+                    Active
+                  </>
+                ) : (
+                  <>
+                    <Clock size={10} />
+                    Pending
+                  </>
+                )}
+              </span>
+            </p>
+            <p><strong>Distance:</strong> <span className="text-gray-300">{droneState.distanceToTarget.toFixed(1)}m</span></p>
+            <p><strong>Start:</strong> ({droneState.startPosition.x.toFixed(0)}, {droneState.startPosition.z.toFixed(0)})</p>
+            <p><strong>Target:</strong> ({droneState.targetPosition.x.toFixed(0)}, {droneState.targetPosition.z.toFixed(0)})</p>
+            {droneState.missionCompleted && (
+              <p className="text-gray-300 font-bold flex items-center gap-1">
+                <Trophy size={12} />
+                SUCCESS!
+              </p>
+            )}
+          </div>
+          <div className="w-full bg-gray-700 rounded-full h-1 mb-1">
             <div
-              className={`h-2 rounded-full transition-all duration-100 ${
-                droneState.isDead ? 'bg-red-500' :
-                droneState.damage > DAMAGE_THRESHOLD * 0.7 ? 'bg-orange-500' : 'bg-green-500'
+              className={`h-1 rounded-full transition-all duration-100 ${
+                droneState.isDead ? 'bg-gray-600' :
+                droneState.damage > DAMAGE_THRESHOLD * 0.7 ? 'bg-gray-500' : 'bg-gray-400'
               }`}
               style={{ width: `${Math.max(0, (DAMAGE_THRESHOLD - droneState.damage) / DAMAGE_THRESHOLD * 100)}%` }}
             ></div>
-          </div>
-          {droneState.damage > 0 && (
-            <p className="text-red-400"><strong>Damage:</strong> ⚠️ {droneState.damage.toFixed(0)}</p>
-          )}
-          <div className="mt-2 text-xs">
-            <p><strong>Active Controls:</strong></p>
-            <div className="flex flex-wrap gap-1 mt-1">
-              {controls.throttleUp && <span className="bg-green-600 px-1 rounded">W↑</span>}
-              {controls.throttleDown && <span className="bg-red-600 px-1 rounded">S↓</span>}
-              {controls.moveLeft && <span className="bg-blue-600 px-1 rounded">A←</span>}
-              {controls.moveRight && <span className="bg-blue-600 px-1 rounded">D→</span>}
-              {controls.moveForward && <span className="bg-purple-600 px-1 rounded">Q↑</span>}
-              {controls.moveBackward && <span className="bg-purple-600 px-1 rounded">E↓</span>}
-              {controls.rotateLeft && <span className="bg-yellow-600 px-1 rounded">Z↺</span>}
-              {controls.rotateRight && <span className="bg-yellow-600 px-1 rounded">C↻</span>}
-            </div>
           </div>
         </div>
       </div>
 
       {/* LiDAR Readings */}
       {droneState.lidarEnabled && droneState.lidarReadings.length > 0 && (
-        <div className="absolute bottom-4 right-4 bg-black bg-opacity-80 text-white p-4 rounded-lg max-w-sm">
-          <h3 className="text-lg font-bold mb-2">🔵 LiDAR Sensor</h3>
-          <div className="text-xs space-y-1">
-            <p><strong>Status:</strong> <span className="text-cyan-400">ACTIVE</span></p>
-            <p><strong>Total Rays:</strong> {droneState.lidarReadings.length}</p>
-            <p><strong>Horizontal:</strong> <span className="text-cyan-400">16</span> | <strong>Vertical:</strong> <span className="text-green-400">8</span></p>
-            <p><strong>Nearest Objects:</strong></p>
-            <div className="max-h-32 overflow-y-auto space-y-1">
+        <div className="absolute bottom-2 right-2 bg-gray-900 bg-opacity-95 text-gray-100 p-2 rounded text-xs max-w-xs border border-gray-700">
+          <h3 className="text-sm font-bold mb-1 flex items-center gap-1">
+            <Radar size={14} />
+            LiDAR
+          </h3>
+          <div className="text-xs space-y-0.5">
+            <p><strong>Rays:</strong> {droneState.lidarReadings.length}</p>
+            <p><strong>Type:</strong> <span className="text-gray-300">Spherical 3D</span></p>
+            <p><strong>Nearest:</strong></p>
+            <div className="max-h-20 overflow-y-auto space-y-0.5">
               {droneState.lidarReadings
                 .filter(reading => reading.distance < 20)
                 .sort((a, b) => a.distance - b.distance)
                 .slice(0, 6)
                 .map((reading, index) => (
                   <div key={index} className="flex justify-between text-xs">
-                    <span className={`${
-                      reading.hitObject === 'building' ? 'text-red-400' :
-                      reading.hitObject === 'tree' ? 'text-green-400' :
-                      reading.hitObject === 'ground' ? 'text-yellow-400' :
-                      'text-gray-400'
-                    }`}>
+                    <span className="text-gray-300">
                       {reading.hitObject}
                     </span>
-                    <span className="text-cyan-300">
+                    <span className="text-gray-400">
                       {reading.distance.toFixed(1)}m
                     </span>
                   </div>
                 ))}
             </div>
-            <div className="mt-2 pt-2 border-t border-gray-600">
-              <p className="text-xs text-gray-400">
-                🔵 Blue dots show ray intersections
+            <div className="mt-1 pt-1 border-t border-gray-600">
+              <p className="text-xs text-gray-400 flex items-center gap-1">
+                <Circle size={8} />
+                Intersections
               </p>
-              <p className="text-xs text-cyan-400">
-                Cyan rays = horizontal scanning
+              <p className="text-xs text-gray-400 flex items-center gap-1">
+                <Radar size={8} />
+                360° Spherical Coverage
               </p>
-              <p className="text-xs text-green-400">
-                Green rays = vertical scanning
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Status Panel */}
+      {droneState.isAutonomous && (
+        <div className="absolute bottom-2 left-2 bg-gray-900 bg-opacity-95 text-gray-100 p-2 rounded text-xs max-w-xs border border-gray-700">
+          <h3 className="text-sm font-bold mb-1 flex items-center gap-1">
+            <Brain size={14} />
+            AI Brain
+          </h3>
+          <div className="text-xs space-y-0.5">
+            <p className="flex items-center gap-1">
+              <strong>Mode:</strong>
+              <span className="flex items-center gap-1 text-gray-300">
+                {trainingState.isTraining ? (
+                  <>
+                    <GraduationCap size={10} />
+                    Learning
+                  </>
+                ) : (
+                  <>
+                    <Brain size={10} />
+                    Thinking
+                  </>
+                )}
+              </span>
+            </p>
+
+            <p><strong>Action:</strong> <span className="text-gray-300">
+              {currentAction !== null ? getActionName(currentAction).split('_')[0] : 'NONE'}
+            </span></p>
+
+            <p><strong>Ep:</strong> {trainingState.currentEpisode} | <strong>Step:</strong> {droneState.episodeStep}</p>
+            <p className="flex items-center gap-1">
+              <strong>Reward:</strong>
+              <span className="text-gray-300">
+                {droneState.totalReward.toFixed(1)}
+                {droneState.totalReward <= -50 && (
+                  <AlertTriangle size={10} className="inline ml-1" />
+                )}
+                {droneState.totalReward <= -100 && (
+                  <Skull size={10} className="inline ml-1" />
+                )}
+              </span>
+              <span className="text-gray-400">
+                ({droneState.lastReward.toFixed(2)})
+              </span>
+            </p>
+            {droneState.episodeStep === 0 && droneState.totalReward === 0 && (
+              <p className="text-gray-400 text-xs flex items-center gap-1">
+                <RotateCcw size={10} />
+                Rewards reset for new mission
               </p>
+            )}
+
+            {trainingState.isTraining && (
+              <>
+                <p><strong>Best:</strong> <span className="text-gray-300">
+                  {trainingState.bestReward === -Infinity ? 'N/A' : trainingState.bestReward.toFixed(1)}
+                </span></p>
+                <p><strong>Crashes:</strong> <span className="text-gray-400">{collisionCount}</span></p>
+              </>
+            )}
+
+            <div className="mt-1 pt-1 border-t border-gray-600">
+              <p className="text-xs text-gray-400 flex items-center gap-1">
+                <Bot size={10} />
+                Neural net + LiDAR
+              </p>
+              {trainingState.isTraining && (
+                <p className="text-xs text-gray-400 flex items-center gap-1">
+                  <GraduationCap size={10} />
+                  Learning with R&P strategy
+                </p>
+              )}
+              {imitationStats.totalDemonstrations > 0 && (
+                <p className="text-xs text-gray-400 flex items-center gap-1">
+                  <Monitor size={10} />
+                  {imitationStats.totalDemonstrations} demos (Q:{imitationStats.averageQuality.toFixed(2)})
+                </p>
+              )}
+              <p className="text-xs text-gray-400 flex items-center gap-1">
+                <RotateCcw size={10} />
+                Auto-respawn
+              </p>
+              <p className="text-xs text-gray-400 flex items-center gap-1">
+                <Clock size={10} />
+                -0.01/step | -30 crash | +1000 target
+              </p>
+              <p className="text-xs text-gray-400 flex items-center gap-1">
+                <Activity size={10} />
+                +3.0 closer | -2.0 away | Shaped rewards
+              </p>
+              <p className="text-xs text-gray-400 flex items-center gap-1">
+                <Heart size={10} />
+                Damage at -200 | Death at -400
+              </p>
+              <p className="text-xs text-gray-400 flex items-center gap-1">
+                <Brain size={10} />
+                Network: 256→128→64 layers, 41 inputs
+              </p>
+              <p className="text-xs text-gray-400 flex items-center gap-1">
+                <Radar size={10} />
+                LiDAR: 16 spherical rays (3D coverage)
+              </p>
+              <p className="text-xs text-gray-400 flex items-center gap-1">
+                <Plane size={10} />
+                Stronger altitude signals | 15-60m missions
+              </p>
+              <p className="text-xs text-gray-400 flex items-center gap-1">
+                <Settings size={10} />
+                Training: {trainingConfig.difficultyLevel} | {trainingObstacles.length} obstacles
+              </p>
+              <p className="text-xs text-gray-400 flex items-center gap-1">
+                <MapPin size={10} />
+                Environment: {buildings.length} buildings | {skyscrapers.length} skyscrapers | {denseTrees.length} trees
+              </p>
+              {respawnCountdown !== null && (
+                <p className="text-xs text-gray-400 font-bold flex items-center gap-1">
+                  <Clock size={10} />
+                  {respawnCountdown}s
+                </p>
+              )}
             </div>
           </div>
         </div>

@@ -26,6 +26,17 @@ export interface DroneState {
   // LiDAR system
   lidarReadings: LiDARReading[]; // Array of distance sensor readings
   lidarEnabled: boolean; // Whether LiDAR visualization is enabled
+  // AI system
+  isAutonomous: boolean; // Whether AI is controlling the drone
+  lastReward: number; // Last reward received from environment
+  totalReward: number; // Cumulative reward for current episode
+  episodeStep: number; // Current step in the episode
+  // Mission system
+  startPosition: Vector3; // Starting position for current mission
+  targetPosition: Vector3; // Target landing position for current mission
+  missionStarted: boolean; // Whether mission has started
+  missionCompleted: boolean; // Whether mission was completed successfully
+  distanceToTarget: number; // Current distance to target
 }
 
 export interface Building {
@@ -42,10 +53,50 @@ export interface Tree {
   radius: number;
 }
 
+// New obstacle types for advanced training
+export interface TrainingObstacle {
+  id: string;
+  type: 'hole' | 'tunnel' | 'gate' | 'tower' | 'moving_platform' | 'wind_zone' | 'narrow_passage' | 'floating_ring' | 'maze_wall' | 'pendulum';
+  position: Vector3;
+  size: Vector3;
+  rotation: Vector3;
+  color: string;
+  isActive: boolean;
+  // Movement properties for dynamic obstacles
+  movement?: {
+    type: 'linear' | 'circular' | 'oscillating' | 'pendulum';
+    speed: number;
+    amplitude: Vector3;
+    phase: number;
+    direction: Vector3;
+  };
+  // Special properties
+  properties?: {
+    windStrength?: number;
+    passageWidth?: number;
+    ringRadius?: number;
+    holeDepth?: number;
+    mazeHeight?: number;
+    pendulumLength?: number;
+  };
+}
+
+export interface TrainingEnvironmentConfig {
+  worldSize: number;
+  obstacleCount: number;
+  difficultyLevel: 'beginner' | 'intermediate' | 'advanced' | 'expert';
+  enableMovingObstacles: boolean;
+  enableWeather: boolean;
+  obstacleTypes: string[];
+}
+
 export interface Environment {
   buildings: Building[];
+  trees: Tree[];
+  trainingObstacles: TrainingObstacle[];
   groundSize: number;
   skyColor: string;
+  config: TrainingEnvironmentConfig;
 }
 
 export interface SimulationControls {

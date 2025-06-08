@@ -1,20 +1,20 @@
 import { Vector3 } from 'three';
-import { Building, Tree, DroneState, SimulationControls, DAMAGE_THRESHOLD, COLLISION_DAMAGE } from '../types/simulation';
+import { Building, Tree, DroneState, SimulationControls, DAMAGE_THRESHOLD, COLLISION_DAMAGE, TrainingObstacle } from '../types/simulation';
 
 export const generateBuildings = (count: number, areaSize: number): Building[] => {
   const buildings: Building[] = [];
-  
+
   for (let i = 0; i < count; i++) {
-    const x = (Math.random() - 0.5) * areaSize;
-    const z = (Math.random() - 0.5) * areaSize;
+    const x = (Math.random() - 0.5) * areaSize * 0.7; // Keep regular buildings in inner area
+    const z = (Math.random() - 0.5) * areaSize * 0.7;
     const height = Math.random() * 20 + 5; // Buildings between 5-25 units tall
     const width = Math.random() * 8 + 3; // Buildings between 3-11 units wide
     const depth = Math.random() * 8 + 3; // Buildings between 3-11 units deep
-    
+
     // Generate random colors for buildings
     const colors = ['#8B4513', '#A0522D', '#CD853F', '#D2691E', '#DEB887'];
     const color = colors[Math.floor(Math.random() * colors.length)];
-    
+
     buildings.push({
       id: `building-${i}`,
       position: new Vector3(x, height / 2, z),
@@ -22,8 +22,104 @@ export const generateBuildings = (count: number, areaSize: number): Building[] =
       color
     });
   }
-  
+
   return buildings;
+};
+
+export const generateSkyscrapers = (count: number, areaSize: number): Building[] => {
+  const skyscrapers: Building[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const x = (Math.random() - 0.5) * areaSize * 0.9; // Use more of the area for skyscrapers
+    const z = (Math.random() - 0.5) * areaSize * 0.9;
+    const height = Math.random() * 100 + 50; // Skyscrapers between 50-150 units tall
+    const width = Math.random() * 15 + 10; // Wider base: 10-25 units
+    const depth = Math.random() * 15 + 10; // Deeper base: 10-25 units
+
+    // Generate modern skyscraper colors (glass, steel, concrete)
+    const colors = ['#4A90E2', '#7ED321', '#50E3C2', '#B8E986', '#9013FE', '#F5A623'];
+    const color = colors[Math.floor(Math.random() * colors.length)];
+
+    skyscrapers.push({
+      id: `skyscraper-${i}`,
+      position: new Vector3(x, height / 2, z),
+      size: new Vector3(width, height, depth),
+      color
+    });
+  }
+
+  return skyscrapers;
+};
+
+export const generateDenseTrees = (count: number, areaSize: number): Tree[] => {
+  const trees: Tree[] = [];
+
+  // Create forest clusters for realistic dense tree areas
+  const clusterCount = Math.floor(count / 8); // Create clusters of ~8 trees each
+
+  for (let cluster = 0; cluster < clusterCount; cluster++) {
+    // Random cluster center
+    const clusterX = (Math.random() - 0.5) * areaSize * 0.8;
+    const clusterZ = (Math.random() - 0.5) * areaSize * 0.8;
+    const clusterRadius = 15 + Math.random() * 20; // 15-35 meter radius clusters
+
+    // Generate trees within this cluster
+    const treesInCluster = 6 + Math.floor(Math.random() * 10); // 6-15 trees per cluster
+
+    for (let i = 0; i < treesInCluster; i++) {
+      // Random position within cluster
+      const angle = Math.random() * Math.PI * 2;
+      const distance = Math.random() * clusterRadius;
+      const x = clusterX + Math.cos(angle) * distance;
+      const z = clusterZ + Math.sin(angle) * distance;
+
+      // Vary tree sizes for realism
+      const treeType = Math.random();
+      let height, radius, color;
+
+      if (treeType < 0.3) {
+        // Small trees/bushes (30%)
+        height = 3 + Math.random() * 5; // 3-8 meters
+        radius = 1.5 + Math.random() * 2; // 1.5-3.5 meters
+        color = '#228B22'; // Forest green
+      } else if (treeType < 0.7) {
+        // Medium trees (40%)
+        height = 8 + Math.random() * 10; // 8-18 meters
+        radius = 2.5 + Math.random() * 3; // 2.5-5.5 meters
+        color = '#32CD32'; // Lime green
+      } else {
+        // Large trees (30%)
+        height = 15 + Math.random() * 15; // 15-30 meters
+        radius = 4 + Math.random() * 4; // 4-8 meters
+        color = '#006400'; // Dark green
+      }
+
+      trees.push({
+        id: `tree-cluster-${cluster}-${i}`,
+        position: new Vector3(x, 0, z),
+        height: height,
+        radius: radius
+      });
+    }
+  }
+
+  // Add some scattered individual trees
+  const scatteredCount = Math.floor(count * 0.3);
+  for (let i = 0; i < scatteredCount; i++) {
+    const x = (Math.random() - 0.5) * areaSize * 0.9;
+    const z = (Math.random() - 0.5) * areaSize * 0.9;
+    const height = 5 + Math.random() * 20; // 5-25 meters
+    const radius = 2 + Math.random() * 4; // 2-6 meters
+
+    trees.push({
+      id: `tree-scattered-${i}`,
+      position: new Vector3(x, 0, z),
+      height: height,
+      radius: radius
+    });
+  }
+
+  return trees;
 };
 
 export const updateDronePosition = (
@@ -31,7 +127,8 @@ export const updateDronePosition = (
   controls: SimulationControls,
   deltaTime: number,
   buildings: Building[] = [],
-  trees: Tree[] = []
+  trees: Tree[] = [],
+  trainingObstacles: TrainingObstacle[] = []
 ): DroneState => {
   const newState = {
     ...droneState,
@@ -45,7 +142,7 @@ export const updateDronePosition = (
   const GRAVITY = 9.81; // Realistic gravity (m/s²)
   const DRONE_MASS = 0.5; // Drone mass in kg (typical FPV drone)
   const MAX_THRUST = 20.0; // Maximum thrust force (N)
-  const HOVER_THRUST = GRAVITY * DRONE_MASS; // Thrust needed to hover
+  const HOVER_THRUST = GRAVITY * DRONE_MASS * 1.15; // 15% more thrust for stable altitude
 
   // Tilt physics
   const MAX_TILT_ANGLE = Math.PI / 4; // 45 degrees max tilt (realistic for FPV)
@@ -65,9 +162,9 @@ export const updateDronePosition = (
     console.log('FPV TAKEOFF: Entering flight mode');
     newState.isLanded = false;
     newState.isFlying = true;
-    newState.throttle = 0.6; // Start with 60% throttle for smooth takeoff
-    newState.enginePower = 0.6;
-    newState.velocity.y = 1.5; // Gentle initial lift
+    newState.throttle = 0.75; // Higher initial throttle for better climb
+    newState.enginePower = 0.75;
+    newState.velocity.y = 3.0; // Stronger initial lift to reach safe altitude
     // Reset tilt for level takeoff
     newState.rotation.x = 0;
     newState.rotation.z = 0;
@@ -90,7 +187,7 @@ export const updateDronePosition = (
     // Handle hover mode
     if (controls.hover) {
       console.log('FPV HOVER: Activating stabilization mode');
-      baseThrust = HOVER_THRUST * 1.05; // Slightly more thrust for stable hover
+      baseThrust = HOVER_THRUST * 1.2; // More thrust for stable hover at good altitude
       thrustModifier = 0;
     } else {
       // Manual throttle control
@@ -280,7 +377,7 @@ export const updateDronePosition = (
 
   // ===== COLLISION DETECTION AND DAMAGE SYSTEM =====
   if (!newState.isDead) {
-    const collisionResult = checkCollisionsWithDamage(newState, buildings, trees);
+    const collisionResult = checkCollisionsWithDamage(newState, buildings, trees, trainingObstacles);
 
     if (collisionResult.hasCollision) {
       // Correct position to prevent clipping through objects
@@ -339,7 +436,7 @@ export const updateDronePosition = (
 
   // Check for collisions after movement (prevent clipping)
   if (!newState.isDead) {
-    const postMovementCollision = checkCollisionsWithDamage(newState, buildings, trees);
+    const postMovementCollision = checkCollisionsWithDamage(newState, buildings, trees, trainingObstacles);
 
     if (postMovementCollision.hasCollision) {
       // Rollback to old position and apply collision
@@ -458,7 +555,8 @@ interface CollisionResult {
 export const checkCollisionsWithDamage = (
   droneState: DroneState,
   buildings: Building[],
-  trees: Tree[]
+  trees: Tree[],
+  trainingObstacles: TrainingObstacle[] = []
 ): CollisionResult => {
   const droneRadius = 1; // Approximate drone size
 
@@ -548,6 +646,106 @@ export const checkCollisionsWithDamage = (
         correctedPosition,
         impactNormal
       };
+    }
+  }
+
+  // Check training obstacles
+  for (const obstacle of trainingObstacles) {
+    if (!obstacle.isActive) continue;
+
+    // Different collision logic based on obstacle type
+    switch (obstacle.type) {
+      case 'tower':
+      case 'maze_wall':
+      case 'moving_platform':
+        // Solid obstacles - standard box collision
+        const obstacleMin = new Vector3(
+          obstacle.position.x - obstacle.size.x / 2,
+          obstacle.position.y - obstacle.size.y / 2,
+          obstacle.position.z - obstacle.size.z / 2
+        );
+        const obstacleMax = new Vector3(
+          obstacle.position.x + obstacle.size.x / 2,
+          obstacle.position.y + obstacle.size.y / 2,
+          obstacle.position.z + obstacle.size.z / 2
+        );
+
+        const closestPoint = new Vector3(
+          Math.max(obstacleMin.x, Math.min(droneState.position.x, obstacleMax.x)),
+          Math.max(obstacleMin.y, Math.min(droneState.position.y, obstacleMax.y)),
+          Math.max(obstacleMin.z, Math.min(droneState.position.z, obstacleMax.z))
+        );
+
+        const distance = droneState.position.distanceTo(closestPoint);
+
+        if (distance < droneRadius) {
+          const impactNormal = droneState.position.clone().sub(closestPoint).normalize();
+          if (impactNormal.length() === 0) {
+            impactNormal.set(0, 1, 0);
+          }
+
+          const correctedPosition = closestPoint.clone().add(
+            impactNormal.multiplyScalar(droneRadius + 0.1)
+          );
+
+          return {
+            hasCollision: true,
+            damage: COLLISION_DAMAGE.BUILDING,
+            type: 'TRAINING_OBSTACLE',
+            correctedPosition,
+            impactNormal
+          };
+        }
+        break;
+
+      case 'hole':
+        // Check if drone falls into hole
+        const holeDistance2D = Math.sqrt(
+          (droneState.position.x - obstacle.position.x) ** 2 +
+          (droneState.position.z - obstacle.position.z) ** 2
+        );
+
+        if (holeDistance2D < obstacle.size.x / 2 &&
+            droneState.position.y < obstacle.position.y + obstacle.size.y / 2) {
+          return {
+            hasCollision: true,
+            damage: COLLISION_DAMAGE.BUILDING * 2, // Holes are very dangerous
+            type: 'HOLE',
+            correctedPosition: new Vector3(
+              droneState.position.x,
+              obstacle.position.y + obstacle.size.y / 2 + droneRadius,
+              droneState.position.z
+            ),
+            impactNormal: new Vector3(0, 1, 0)
+          };
+        }
+        break;
+
+      case 'pendulum':
+        // Check collision with pendulum weight
+        const pendulumLength = obstacle.properties?.pendulumLength || 8;
+        const pendulumAngle = obstacle.rotation.z;
+        const weightPosition = new Vector3(
+          obstacle.position.x + Math.sin(pendulumAngle) * pendulumLength,
+          obstacle.position.y - pendulumLength + Math.cos(pendulumAngle) * pendulumLength,
+          obstacle.position.z
+        );
+
+        const pendulumDistance = droneState.position.distanceTo(weightPosition);
+        if (pendulumDistance < droneRadius + 1) {
+          const impactNormal = droneState.position.clone().sub(weightPosition).normalize();
+
+          return {
+            hasCollision: true,
+            damage: COLLISION_DAMAGE.BUILDING,
+            type: 'PENDULUM',
+            correctedPosition: weightPosition.clone().add(
+              impactNormal.multiplyScalar(droneRadius + 1.1)
+            ),
+            impactNormal
+          };
+        }
+        break;
     }
   }
 

@@ -136,17 +136,17 @@ export const Drone: React.FC<DroneProps> = ({ droneState, onPositionChange, onLi
       <mesh position={[0, -0.1, 1]}>
         <sphereGeometry args={[0.1]} />
         <meshStandardMaterial
-          color={droneState.isDead ? "#ff0000" : "#00ff00"}
-          emissive={droneState.isDead ? "#ff0000" : "#00ff00"}
-          emissiveIntensity={droneState.isDead ? 1.0 : (droneState.isFlying ? 0.8 : 0.2)}
+          color={droneState.isDead ? "#888888" : "#aaaaaa"}
+          emissive={droneState.isDead ? "#666666" : "#888888"}
+          emissiveIntensity={droneState.isDead ? 0.5 : (droneState.isFlying ? 0.4 : 0.1)}
         />
       </mesh>
       <mesh position={[0, -0.1, -1]}>
         <sphereGeometry args={[0.1]} />
         <meshStandardMaterial
-          color="#ff0000"
-          emissive="#ff0000"
-          emissiveIntensity={droneState.isDead ? 1.0 : (droneState.isFlying ? 0.8 : 0.2)}
+          color="#888888"
+          emissive="#666666"
+          emissiveIntensity={droneState.isDead ? 0.5 : (droneState.isFlying ? 0.4 : 0.1)}
         />
       </mesh>
 
@@ -189,9 +189,9 @@ export const Drone: React.FC<DroneProps> = ({ droneState, onPositionChange, onLi
             <mesh position={[0.1, -0.05, -0.1]}>
               <sphereGeometry args={[0.02]} />
               <meshStandardMaterial
-                color="#ff0000"
-                emissive="#ff0000"
-                emissiveIntensity={droneState.isFlying ? 0.8 : 0.2}
+                color="#888888"
+                emissive="#666666"
+                emissiveIntensity={droneState.isFlying ? 0.4 : 0.1}
               />
             </mesh>
           </group>
@@ -230,16 +230,16 @@ export const Drone: React.FC<DroneProps> = ({ droneState, onPositionChange, onLi
             ]}>
               <sphereGeometry args={[0.02]} />
               <meshBasicMaterial
-                color="#ffaa00"
-                emissive="#ffaa00"
-                emissiveIntensity={0.8}
+                color="#999999"
+                emissive="#777777"
+                emissiveIntensity={0.4}
               />
             </mesh>
           ))}
         </group>
       )}
 
-      {/* LiDAR System - positioned relative to drone */}
+      {/* Enhanced LiDAR System - positioned relative to drone */}
       <LiDAR
         position={new Vector3(0, 0, 0)} // Relative to drone center
         rotation={new Vector3(0, 0, 0)} // Use drone's rotation from parent group
@@ -249,9 +249,11 @@ export const Drone: React.FC<DroneProps> = ({ droneState, onPositionChange, onLi
             onLiDARUpdate(readings);
           }
         }}
-        maxRange={20}
-        horizontalRayCount={16}
-        verticalRayCount={8}
+        maxRange={25}
+        horizontalRayCount={0}
+        verticalRayCount={0}
+        downwardRayCount={0}
+        sphericalRayCount={16}
       />
     </group>
   );

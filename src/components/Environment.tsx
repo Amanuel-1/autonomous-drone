@@ -6,6 +6,8 @@ import { Building, Tree } from '../types/simulation';
 
 interface EnvironmentProps {
   buildings: Building[];
+  skyscrapers?: Building[];
+  denseTrees?: Tree[];
   groundSize: number;
   trees: Tree[];
 }
@@ -29,7 +31,13 @@ export const generateTrees = (groundSize: number): Tree[] => {
 
 export const defaultTrees = generateTrees(100); // Generate trees once outside component
 
-export const Environment: React.FC<EnvironmentProps> = ({ buildings, groundSize, trees }) => {
+export const Environment: React.FC<EnvironmentProps> = ({
+  buildings,
+  skyscrapers = [],
+  denseTrees = [],
+  groundSize,
+  trees
+}) => {
   return (
     <group>
       {/* Ground plane */}
@@ -41,7 +49,7 @@ export const Environment: React.FC<EnvironmentProps> = ({ buildings, groundSize,
       {/* Grid lines for reference */}
       <gridHelper args={[groundSize, 20, '#666666', '#444444']} position={[0, 0, 0]} />
 
-      {/* Buildings */}
+      {/* Regular Buildings */}
       {buildings.map((building) => (
         <mesh
           key={building.id}
@@ -52,6 +60,57 @@ export const Environment: React.FC<EnvironmentProps> = ({ buildings, groundSize,
           <boxGeometry args={[building.size.x, building.size.y, building.size.z]} />
           <meshStandardMaterial color={building.color} />
         </mesh>
+      ))}
+
+      {/* Skyscrapers */}
+      {skyscrapers.map((skyscraper) => (
+        <group key={skyscraper.id}>
+          {/* Main skyscraper structure */}
+          <mesh
+            position={[skyscraper.position.x, skyscraper.position.y, skyscraper.position.z]}
+            castShadow
+            receiveShadow
+          >
+            <boxGeometry args={[skyscraper.size.x, skyscraper.size.y, skyscraper.size.z]} />
+            <meshStandardMaterial
+              color={skyscraper.color}
+              metalness={0.3}
+              roughness={0.1}
+            />
+          </mesh>
+
+          {/* Skyscraper details - windows */}
+          <mesh
+            position={[
+              skyscraper.position.x,
+              skyscraper.position.y,
+              skyscraper.position.z + skyscraper.size.z / 2 + 0.1
+            ]}
+          >
+            <planeGeometry args={[skyscraper.size.x * 0.9, skyscraper.size.y * 0.9]} />
+            <meshStandardMaterial
+              color="#87CEEB"
+              transparent
+              opacity={0.7}
+              metalness={0.8}
+              roughness={0.1}
+            />
+          </mesh>
+
+          {/* Antenna/spire for very tall buildings */}
+          {skyscraper.size.y > 80 && (
+            <mesh
+              position={[
+                skyscraper.position.x,
+                skyscraper.position.y + skyscraper.size.y / 2 + 5,
+                skyscraper.position.z
+              ]}
+            >
+              <cylinderGeometry args={[0.2, 0.2, 10]} />
+              <meshStandardMaterial color="#FF0000" />
+            </mesh>
+          )}
+        </group>
       ))}
 
       {/* Ambient lighting */}
@@ -77,8 +136,7 @@ export const Environment: React.FC<EnvironmentProps> = ({ buildings, groundSize,
         <meshBasicMaterial color="#87CEEB" side={2} />
       </mesh>
 
-      {/* Some decorative elements */}
-      {/* Trees */}
+      {/* Regular Trees */}
       {trees.map((tree) => (
         <group key={tree.id} position={[tree.position.x, 0, tree.position.z]}>
           {/* Tree trunk */}
@@ -93,6 +151,55 @@ export const Environment: React.FC<EnvironmentProps> = ({ buildings, groundSize,
           </mesh>
         </group>
       ))}
+
+      {/* Dense Forest Trees */}
+      {denseTrees.map((tree) => {
+        // Determine tree type based on height for varied appearance
+        const isLargeTree = tree.height > 20;
+        const isMediumTree = tree.height > 10 && tree.height <= 20;
+
+        const trunkRadius = isLargeTree ? 0.6 : isMediumTree ? 0.4 : 0.25;
+        const trunkColor = isLargeTree ? "#654321" : "#8B4513";
+        const foliageColor = isLargeTree ? "#006400" : isMediumTree ? "#32CD32" : "#228B22";
+
+        return (
+          <group key={tree.id} position={[tree.position.x, 0, tree.position.z]}>
+            {/* Tree trunk */}
+            <mesh position={[0, tree.height / 2, 0]} castShadow>
+              <cylinderGeometry args={[trunkRadius * 0.8, trunkRadius, tree.height]} />
+              <meshStandardMaterial color={trunkColor} />
+            </mesh>
+
+            {/* Main foliage */}
+            <mesh position={[0, tree.height + tree.radius / 2, 0]} castShadow>
+              <sphereGeometry args={[tree.radius, 8, 6]} />
+              <meshStandardMaterial color={foliageColor} />
+            </mesh>
+
+            {/* Additional foliage layers for large trees */}
+            {isLargeTree && (
+              <>
+                <mesh position={[0, tree.height - tree.radius / 3, 0]} castShadow>
+                  <sphereGeometry args={[tree.radius * 0.8, 8, 6]} />
+                  <meshStandardMaterial color={foliageColor} />
+                </mesh>
+                <mesh position={[0, tree.height + tree.radius * 1.2, 0]} castShadow>
+                  <sphereGeometry args={[tree.radius * 0.6, 8, 6]} />
+                  <meshStandardMaterial color={foliageColor} />
+                </mesh>
+              </>
+            )}
+
+            {/* Medium trees get one extra layer */}
+            {isMediumTree && (
+              <mesh position={[0, tree.height - tree.radius / 4, 0]} castShadow>
+                <sphereGeometry args={[tree.radius * 0.7, 8, 6]} />
+                <meshStandardMaterial color={foliageColor} />
+              </mesh>
+            )}
+          </group>
+        );
+      })}
 
       {/* Roads/paths */}
       <mesh position={[0, 0.01, 0]} receiveShadow>

@@ -13,6 +13,8 @@ interface LiDARProps {
   maxRange?: number;
   horizontalRayCount?: number;
   verticalRayCount?: number;
+  downwardRayCount?: number;
+  sphericalRayCount?: number;
 }
 
 export const LiDAR: React.FC<LiDARProps> = ({
@@ -22,7 +24,9 @@ export const LiDAR: React.FC<LiDARProps> = ({
   onReadingsUpdate,
   maxRange = 20,
   horizontalRayCount = 16,
-  verticalRayCount = 8
+  verticalRayCount = 12,
+  downwardRayCount = 8,
+  sphericalRayCount = 16
 }) => {
   const { scene } = useThree();
   const raycaster = useMemo(() => new Raycaster(), []);
@@ -30,11 +34,11 @@ export const LiDAR: React.FC<LiDARProps> = ({
   const hitDotsRef = useRef<Object3D[]>([]);
   const groupRef = useRef<Object3D>(null);
 
-  // Create ray lines and hit dots for both horizontal and vertical rays
+  // Create ray lines and hit dots for all ray types
   const { rayLines, hitDots } = useMemo(() => {
     const lines: Line[] = [];
     const dots: Object3D[] = [];
-    const totalRays = horizontalRayCount + verticalRayCount;
+    const totalRays = horizontalRayCount + verticalRayCount + downwardRayCount + sphericalRayCount;
 
     for (let i = 0; i < totalRays; i++) {
       // Create ray line
@@ -42,10 +46,31 @@ export const LiDAR: React.FC<LiDARProps> = ({
       const positions = new Float32Array(6); // 2 points * 3 coordinates
       geometry.setAttribute('position', new BufferAttribute(positions, 3));
 
-      // Different colors for horizontal vs vertical rays
-      const isVertical = i >= horizontalRayCount;
+      // Determine ray type and color
+      let rayType: string;
+      let lineColor: number;
+      let dotColor: number;
+
+      if (i < horizontalRayCount) {
+        rayType = 'horizontal';
+        lineColor = 0x00ffff; // Cyan for horizontal
+        dotColor = 0x0066ff;  // Blue
+      } else if (i < horizontalRayCount + verticalRayCount) {
+        rayType = 'vertical';
+        lineColor = 0x00ff88; // Green-cyan for vertical
+        dotColor = 0x0088ff;  // Light blue
+      } else if (i < horizontalRayCount + verticalRayCount + downwardRayCount) {
+        rayType = 'downward';
+        lineColor = 0xff8800; // Orange for downward
+        dotColor = 0xff4400;  // Red-orange
+      } else {
+        rayType = 'spherical';
+        lineColor = 0xff00ff; // Magenta for spherical
+        dotColor = 0xaa00aa;  // Purple
+      }
+
       const material = new LineBasicMaterial({
-        color: isVertical ? 0x00ff88 : 0x00ffff, // Green-cyan for vertical, cyan for horizontal
+        color: lineColor,
         transparent: true,
         opacity: 0.6
       });
@@ -56,8 +81,8 @@ export const LiDAR: React.FC<LiDARProps> = ({
       // Create hit dot
       const dotGeometry = new SphereGeometry(0.08, 6, 6);
       const dotMaterial = new MeshBasicMaterial({
-        color: isVertical ? 0x0088ff : 0x0066ff, // Different blue shades
-        emissive: isVertical ? 0x0088ff : 0x0066ff,
+        color: dotColor,
+        emissive: dotColor,
         emissiveIntensity: 0.5
       });
       const dot = new Mesh(dotGeometry, dotMaterial);
@@ -66,7 +91,7 @@ export const LiDAR: React.FC<LiDARProps> = ({
     }
 
     return { rayLines: lines, hitDots: dots };
-  }, [horizontalRayCount, verticalRayCount]);
+  }, [horizontalRayCount, verticalRayCount, downwardRayCount, sphericalRayCount]);
 
   // Add lines and dots to the group
   useEffect(() => {
@@ -100,33 +125,60 @@ export const LiDAR: React.FC<LiDARProps> = ({
     worldEuler.setFromQuaternion(worldQuaternion);
     const worldRotation = new Vector3(worldEuler.x, worldEuler.y, worldEuler.z);
 
-    const totalRays = horizontalRayCount + verticalRayCount;
+    const totalRays = horizontalRayCount + verticalRayCount + downwardRayCount + sphericalRayCount;
 
     for (let i = 0; i < totalRays; i++) {
       let direction: Vector3;
       let angle: number;
 
       if (i < horizontalRayCount) {
-        // Horizontal rays (around the drone in a circle)
+        // Horizontal rays (around the drone in a circle at drone level)
         angle = (i / horizontalRayCount) * Math.PI * 2; // 360 degrees in radians
         direction = new Vector3(
           Math.cos(angle + worldRotation.y), // Apply drone's Y rotation
           0, // Keep rays horizontal
           Math.sin(angle + worldRotation.y)
         ).normalize();
-      } else {
-        // Vertical rays (up and down from the drone)
+
+      } else if (i < horizontalRayCount + verticalRayCount) {
+        // Vertical rays (scattered up and down with horizontal spread)
         const verticalIndex = i - horizontalRayCount;
-        const verticalAngle = (verticalIndex / verticalRayCount) * Math.PI; // 0 to π radians
+        const azimuthAngle = (verticalIndex / verticalRayCount) * Math.PI * 2; // Full 360° azimuth
+        const elevationAngle = -Math.PI / 6 + (verticalIndex % 3) * (Math.PI / 6); // -30°, 0°, +30° elevation
 
-        // Create rays going up and down at various angles
-        const elevation = (verticalAngle - Math.PI / 2); // -π/2 to π/2 (down to up)
-        angle = verticalAngle; // Store for reading data
-
+        angle = azimuthAngle;
         direction = new Vector3(
-          0, // No horizontal component for pure vertical rays
-          Math.sin(elevation), // Y component (up/down)
-          Math.cos(elevation) * 0.1 // Small forward component to avoid pure vertical
+          Math.cos(elevationAngle) * Math.cos(azimuthAngle + worldRotation.y),
+          Math.sin(elevationAngle),
+          Math.cos(elevationAngle) * Math.sin(azimuthAngle + worldRotation.y)
+        ).normalize();
+
+      } else if (i < horizontalRayCount + verticalRayCount + downwardRayCount) {
+        // Downward rays (scattered below the drone for ground detection)
+        const downwardIndex = i - horizontalRayCount - verticalRayCount;
+        const azimuthAngle = (downwardIndex / downwardRayCount) * Math.PI * 2; // 360° spread
+        const elevationAngle = -Math.PI / 4 - (Math.PI / 6) * Math.random(); // -45° to -75° downward
+
+        angle = azimuthAngle;
+        direction = new Vector3(
+          Math.cos(elevationAngle) * Math.cos(azimuthAngle + worldRotation.y),
+          Math.sin(elevationAngle), // Negative Y for downward
+          Math.cos(elevationAngle) * Math.sin(azimuthAngle + worldRotation.y)
+        ).normalize();
+
+      } else {
+        // Spherical rays (3D scattered in all directions for comprehensive coverage)
+        const sphericalIndex = i - horizontalRayCount - verticalRayCount - downwardRayCount;
+
+        // Use spherical coordinates for even distribution
+        const phi = Math.acos(1 - 2 * (sphericalIndex + 0.5) / sphericalRayCount); // Polar angle
+        const theta = Math.PI * (1 + Math.sqrt(5)) * sphericalIndex; // Azimuthal angle (golden ratio)
+
+        angle = theta;
+        direction = new Vector3(
+          Math.sin(phi) * Math.cos(theta + worldRotation.y),
+          Math.cos(phi),
+          Math.sin(phi) * Math.sin(theta + worldRotation.y)
         ).normalize();
       }
 
