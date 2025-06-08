@@ -3,14 +3,16 @@
 import React, { useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Mesh, Vector3 } from 'three';
-import { DroneState } from '../types/simulation';
+import { DroneState, LiDARReading } from '../types/simulation';
+import { LiDAR } from './LiDAR';
 
 interface DroneProps {
   droneState: DroneState;
   onPositionChange?: (position: Vector3) => void;
+  onLiDARUpdate?: (readings: LiDARReading[]) => void;
 }
 
-export const Drone: React.FC<DroneProps> = ({ droneState, onPositionChange }) => {
+export const Drone: React.FC<DroneProps> = ({ droneState, onPositionChange, onLiDARUpdate }) => {
   const droneRef = useRef<Mesh>(null);
   const propellerRefs = useRef<Mesh[]>([]);
 
@@ -236,6 +238,21 @@ export const Drone: React.FC<DroneProps> = ({ droneState, onPositionChange }) =>
           ))}
         </group>
       )}
+
+      {/* LiDAR System - positioned relative to drone */}
+      <LiDAR
+        position={new Vector3(0, 0, 0)} // Relative to drone center
+        rotation={new Vector3(0, 0, 0)} // Use drone's rotation from parent group
+        enabled={droneState.lidarEnabled}
+        onReadingsUpdate={(readings) => {
+          if (onLiDARUpdate) {
+            onLiDARUpdate(readings);
+          }
+        }}
+        maxRange={20}
+        horizontalRayCount={16}
+        verticalRayCount={8}
+      />
     </group>
   );
 };

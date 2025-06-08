@@ -1,5 +1,12 @@
 import { Vector3 } from 'three';
 
+export interface LiDARReading {
+  angle: number; // Angle in radians (0 = forward)
+  distance: number; // Distance to nearest object in meters
+  hitPoint: Vector3; // 3D position where ray hit object
+  hitObject: string; // Type of object hit ('building', 'tree', 'ground', 'none')
+}
+
 export interface DroneState {
   position: Vector3;
   rotation: Vector3;
@@ -16,6 +23,9 @@ export interface DroneState {
   // Damage system
   damage: number; // Current damage points
   isDead: boolean; // Whether drone has crashed and is dead
+  // LiDAR system
+  lidarReadings: LiDARReading[]; // Array of distance sensor readings
+  lidarEnabled: boolean; // Whether LiDAR visualization is enabled
 }
 
 export interface Building {

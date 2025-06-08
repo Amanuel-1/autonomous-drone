@@ -6,7 +6,7 @@ import { Vector3 } from 'three';
 import { Drone } from './Drone';
 import { Environment } from './Environment';
 import { Camera } from './Camera';
-import { DroneState, SimulationControls, CameraSettings, DAMAGE_THRESHOLD } from '../types/simulation';
+import { DroneState, SimulationControls, CameraSettings, DAMAGE_THRESHOLD, LiDARReading } from '../types/simulation';
 import { generateBuildings, updateDronePosition, getRandomSpawnPosition } from '../utils/simulation';
 import { defaultTrees } from './Environment';
 
@@ -24,7 +24,9 @@ export const DroneSimulation: React.FC = () => {
     cameraTilt: 0, // Camera starts level
     cameraRotation: 0, // Camera starts facing forward
     damage: 0, // Start with no damage
-    isDead: false // Start alive
+    isDead: false, // Start alive
+    lidarReadings: [], // Start with empty LiDAR readings
+    lidarEnabled: true // Start with LiDAR enabled
   });
 
   const [controls, setControls] = useState<SimulationControls>({
@@ -257,12 +259,22 @@ export const DroneSimulation: React.FC = () => {
       cameraTilt: 0,
       cameraRotation: 0,
       damage: 0,
-      isDead: false
+      isDead: false,
+      lidarReadings: [],
+      lidarEnabled: true
     });
   }, [buildings]);
 
   const toggleCameraFollow = useCallback(() => {
     setCameraSettings(prev => ({ ...prev, followDrone: !prev.followDrone }));
+  }, []);
+
+  const toggleLiDAR = useCallback(() => {
+    setDroneState(prev => ({ ...prev, lidarEnabled: !prev.lidarEnabled }));
+  }, []);
+
+  const handleLiDARUpdate = useCallback((readings: LiDARReading[]) => {
+    setDroneState(prev => ({ ...prev, lidarReadings: readings }));
   }, []);
 
   const handleTakeoff = useCallback(() => {
@@ -288,7 +300,7 @@ export const DroneSimulation: React.FC = () => {
         gl={{ antialias: true }}
       >
         <Environment buildings={buildings} groundSize={groundSize} trees={trees} />
-        <Drone droneState={droneState} />
+        <Drone droneState={droneState} onLiDARUpdate={handleLiDARUpdate} />
         <Camera
           dronePosition={droneState.position}
           droneRotation={droneState.rotation}
@@ -307,8 +319,12 @@ export const DroneSimulation: React.FC = () => {
           <p><strong>🎯 HOVER:</strong> <span className="text-purple-300">H</span> (auto-level)</p>
           <p><strong>📹 CAMERA:</strong> I/K (tilt), J/O (rotate)</p>
           <p><strong>🛫 Takeoff:</strong> T | <strong>🛬 Land:</strong> L</p>
+          <p><strong>🔵 LiDAR:</strong> Toggle in controls panel</p>
           <p className="text-yellow-300 text-xs mt-2">
-            💡 Realistic FPV physics! Shift key only works with arrows - no conflicts!
+            💡 Realistic FPV physics! LiDAR shows 3D distance sensing with blue dots!
+          </p>
+          <p className="text-cyan-300 text-xs">
+            🔵 Cyan rays = horizontal | 🟢 Green rays = vertical
           </p>
         </div>
         <div className="mt-4 space-y-2">
@@ -357,6 +373,16 @@ export const DroneSimulation: React.FC = () => {
             className="block w-full px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm transition-colors"
           >
             📹 {cameraSettings.followDrone ? 'Free Camera' : 'Follow Drone'}
+          </button>
+          <button
+            onClick={toggleLiDAR}
+            className={`block w-full px-3 py-1 rounded text-sm transition-colors ${
+              droneState.lidarEnabled
+                ? 'bg-cyan-600 hover:bg-cyan-700'
+                : 'bg-gray-600 hover:bg-gray-700'
+            }`}
+          >
+            🔵 LiDAR {droneState.lidarEnabled ? 'ON' : 'OFF'}
           </button>
           <button
             onClick={resetSimulation}
@@ -420,6 +446,51 @@ export const DroneSimulation: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* LiDAR Readings */}
+      {droneState.lidarEnabled && droneState.lidarReadings.length > 0 && (
+        <div className="absolute bottom-4 right-4 bg-black bg-opacity-80 text-white p-4 rounded-lg max-w-sm">
+          <h3 className="text-lg font-bold mb-2">🔵 LiDAR Sensor</h3>
+          <div className="text-xs space-y-1">
+            <p><strong>Status:</strong> <span className="text-cyan-400">ACTIVE</span></p>
+            <p><strong>Total Rays:</strong> {droneState.lidarReadings.length}</p>
+            <p><strong>Horizontal:</strong> <span className="text-cyan-400">16</span> | <strong>Vertical:</strong> <span className="text-green-400">8</span></p>
+            <p><strong>Nearest Objects:</strong></p>
+            <div className="max-h-32 overflow-y-auto space-y-1">
+              {droneState.lidarReadings
+                .filter(reading => reading.distance < 20)
+                .sort((a, b) => a.distance - b.distance)
+                .slice(0, 6)
+                .map((reading, index) => (
+                  <div key={index} className="flex justify-between text-xs">
+                    <span className={`${
+                      reading.hitObject === 'building' ? 'text-red-400' :
+                      reading.hitObject === 'tree' ? 'text-green-400' :
+                      reading.hitObject === 'ground' ? 'text-yellow-400' :
+                      'text-gray-400'
+                    }`}>
+                      {reading.hitObject}
+                    </span>
+                    <span className="text-cyan-300">
+                      {reading.distance.toFixed(1)}m
+                    </span>
+                  </div>
+                ))}
+            </div>
+            <div className="mt-2 pt-2 border-t border-gray-600">
+              <p className="text-xs text-gray-400">
+                🔵 Blue dots show ray intersections
+              </p>
+              <p className="text-xs text-cyan-400">
+                Cyan rays = horizontal scanning
+              </p>
+              <p className="text-xs text-green-400">
+                Green rays = vertical scanning
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
