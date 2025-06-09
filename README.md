@@ -1,4 +1,6 @@
 # Autonomous Drone Simulation
+<img width="1430" alt="Screenshot 2025-06-09 at 11 41 58 in the morning" src="https://github.com/user-attachments/assets/a7bf79d8-280c-47ed-9fe6-3d6c9c8bdd7a" />
+
 
 A sophisticated 3D drone simulation built with Next.js, Three.js, and React Three Fiber, featuring AI-powered autonomous flight capabilities using deep reinforcement learning.
 
@@ -39,6 +41,9 @@ A sophisticated 3D drone simulation built with Next.js, Three.js, and React Thre
 - **Icons**: Lucide React
 - **AI/ML**: Custom neural network implementation with reinforcement learning
 - **Package Manager**: pnpm
+<img width="1430" alt="Screenshot 2025-06-09 at 11 42 41 in the morning" src="https://github.com/user-attachments/assets/2aa3d2e2-0b14-4a1a-8948-eeb6da475456" />
+
+
 
 ## 🚀 Getting Started
 
