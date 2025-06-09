@@ -174,9 +174,3 @@ MIT License © 2025 Amanuel Garomsa
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 This is a personal research project exploring autonomous drone flight using deep reinforcement learning and imitation learning techniques.
-
-## 🙏 Acknowledgments
-
-- Three.js community for excellent 3D graphics capabilities
-- React Three Fiber for seamless React integration
-- Reinforcement learning research community for algorithmic foundations
