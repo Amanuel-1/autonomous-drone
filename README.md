@@ -4,6 +4,8 @@
 
 A sophisticated 3D drone simulation built with Next.js, Three.js, and React Three Fiber, featuring AI-powered autonomous flight capabilities using deep reinforcement learning.
 
+![Drone Simulation Demo](public/droneSim.gif)
+
 ## 🚁 Features
 
 ### Core Simulation
