@@ -1,3 +1,16 @@
+/**
+ * Autonomous Drone Simulation - Personal Research Project
+ *
+ * MIT License
+ * Copyright (c) 2025 Amanuel Garomsa
+ *
+ * Author: Amanuel Garomsa
+ * Email: amanuelgaromsa@gmail.com
+ * Position: Computer Science Graduate, Icoglabs, SingularityNet
+ *
+ * 3D Drone model with physics and LiDAR sensor integration
+ */
+
 'use client';
 
 import React, { useRef, useEffect } from 'react';

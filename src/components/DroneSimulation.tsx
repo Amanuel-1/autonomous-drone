@@ -1,5 +1,19 @@
 'use client';
 
+/**
+ * Autonomous Drone Simulation - Personal Research Project
+ *
+ * MIT License
+ * Copyright (c) 2025 Amanuel Garomsa
+ *
+ * Author: Amanuel Garomsa
+ * Email: amanuelgaromsa@gmail.com
+ * Position: Computer Science Graduate, Icoglabs, SingularityNet
+ *
+ * This is a personal research project exploring autonomous drone flight
+ * using deep reinforcement learning and imitation learning techniques.
+ */
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Vector3 } from 'three';
@@ -15,7 +29,7 @@ import { Environment } from './Environment';
 import { Camera } from './Camera';
 import { MissionMarkers } from './MissionMarkers';
 import { DroneState, SimulationControls, CameraSettings, DAMAGE_THRESHOLD, LiDARReading, TrainingObstacle } from '../types/simulation';
-import { generateBuildings, generateSkyscrapers, generateDenseTrees, updateDronePosition } from '../utils/simulation';
+import { generateBuildings, generateSkyscrapers, generateDenseTrees, updateDronePosition, getRandomSpawnPosition } from '../utils/simulation';
 import { defaultTrees } from './Environment';
 import { ReinforcementLearning } from '../ai/ReinforcementLearning';
 import { TrainingEnvironment } from '../ai/TrainingEnvironment';
@@ -27,7 +41,6 @@ import {
   getDefaultTrainingConfig,
   getDefaultRewardConfig,
   getActionName,
-  generateMissionCoordinates,
   getDefaultTrainingEnvironmentConfig
 } from '../utils/aiHelpers';
 import { TrainingObstacleGenerator } from '../utils/trainingObstacles';
@@ -89,10 +102,10 @@ export const DroneSimulation: React.FC = () => {
   });
 
   const groundSize = 200; // Expanded world size
-  const buildings = useMemo(() => generateBuildings(15, groundSize), []); // Regular buildings
-  const skyscrapers = useMemo(() => generateSkyscrapers(8, groundSize), []); // Add skyscrapers
+  const buildings = useMemo(() => generateBuildings(8, groundSize), []); // Reduced regular buildings
+  const skyscrapers = useMemo(() => generateSkyscrapers(4, groundSize), []); // Reduced skyscrapers
   const trees = useMemo(() => defaultTrees, []);
-  const denseTrees = useMemo(() => generateDenseTrees(60, groundSize), []); // Dense forest areas
+  const denseTrees = useMemo(() => generateDenseTrees(25, groundSize), []); // Reduced dense forest areas
 
   // Training Environment
   const [trainingConfig] = useState(() => getDefaultTrainingEnvironmentConfig());
@@ -531,14 +544,33 @@ export const DroneSimulation: React.FC = () => {
   }, [controls, buildings, trees, collisionCount, trainingState.isTraining]);
 
   const resetSimulation = useCallback((preserveAIState: boolean = false) => {
-    // Generate new mission coordinates
-    const mission = generateMissionCoordinates(groundSize, 15);
+    // Generate safe spawn position that avoids all obstacles
+    const allBuildings = [...buildings, ...skyscrapers];
+    const safeStartPosition = getRandomSpawnPosition(allBuildings, trees, denseTrees, trainingObstacles, groundSize);
+
+    // Generate target position that's also safe and at appropriate distance
+    let targetPosition: Vector3;
+    let attempts = 0;
+    const maxAttempts = 50;
+
+    do {
+      targetPosition = getRandomSpawnPosition(allBuildings, trees, denseTrees, trainingObstacles, groundSize);
+      attempts++;
+    } while (
+      attempts < maxAttempts &&
+      (safeStartPosition.distanceTo(targetPosition) < 15 || safeStartPosition.distanceTo(targetPosition) > 50)
+    );
+
+    // Fallback if no good target found
+    if (attempts >= maxAttempts) {
+      targetPosition = safeStartPosition.clone().add(new Vector3(20, 0, 20));
+    }
 
     setDroneState(prevState => {
-      const newDistanceToTarget = mission.start.distanceTo(mission.target);
+      const newDistanceToTarget = safeStartPosition.distanceTo(targetPosition);
 
       return {
-        position: mission.start.clone(),
+        position: safeStartPosition.clone(),
         rotation: new Vector3(0, 0, 0),
         velocity: new Vector3(0, 0, 0),
         angularVelocity: new Vector3(0, 0, 0),
@@ -559,8 +591,8 @@ export const DroneSimulation: React.FC = () => {
         totalReward: 0, // Always reset total reward for new mission
         episodeStep: 0, // Always reset episode step for new mission
         // Mission system - always generate new mission
-        startPosition: mission.start.clone(),
-        targetPosition: mission.target.clone(),
+        startPosition: safeStartPosition.clone(),
+        targetPosition: targetPosition.clone(),
         missionStarted: false,
         missionCompleted: false,
         distanceToTarget: newDistanceToTarget
@@ -572,8 +604,8 @@ export const DroneSimulation: React.FC = () => {
       setCollisionCount(0);
     }
 
-    console.log(`🎯 New mission generated: Start(${mission.start.x.toFixed(1)}, ${mission.start.z.toFixed(1)}) → Target(${mission.target.x.toFixed(1)}, ${mission.target.z.toFixed(1)})`);
-  }, [buildings, groundSize]);
+    console.log(`[MISSION] New safe mission: Start(${safeStartPosition.x.toFixed(1)}, ${safeStartPosition.z.toFixed(1)}) → Target(${targetPosition.x.toFixed(1)}, ${targetPosition.z.toFixed(1)})`);
+  }, [buildings, skyscrapers, trees, denseTrees, trainingObstacles, groundSize]);
 
   const toggleCameraFollow = useCallback(() => {
     setCameraSettings(prev => ({ ...prev, followDrone: !prev.followDrone }));
@@ -1288,7 +1320,7 @@ export const DroneSimulation: React.FC = () => {
               </p>
               <p className="text-xs text-gray-400 flex items-center gap-1">
                 <MapPin size={10} />
-                Environment: {buildings.length} buildings | {skyscrapers.length} skyscrapers | {denseTrees.length} trees
+                Environment: {buildings.length + skyscrapers.length} buildings | {denseTrees.length} trees | {trainingObstacles.length} obstacles
               </p>
               {respawnCountdown !== null && (
                 <p className="text-xs text-gray-400 font-bold flex items-center gap-1">

@@ -1,3 +1,16 @@
+/**
+ * Autonomous Drone Simulation - Personal Research Project
+ *
+ * MIT License
+ * Copyright (c) 2025 Amanuel Garomsa
+ *
+ * Author: Amanuel Garomsa
+ * Email: amanuelgaromsa@gmail.com
+ * Position: Computer Science Graduate, Icoglabs, SingularityNet
+ *
+ * AI and Machine Learning type definitions for autonomous drone control
+ */
+
 import { Vector3 } from 'three';
 import { LiDARReading } from './simulation';
 

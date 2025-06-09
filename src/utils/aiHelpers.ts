@@ -1,3 +1,16 @@
+/**
+ * Autonomous Drone Simulation - Personal Research Project
+ *
+ * MIT License
+ * Copyright (c) 2025 Amanuel Garomsa
+ *
+ * Author: Amanuel Garomsa
+ * Email: amanuelgaromsa@gmail.com
+ * Position: Computer Science Graduate, Icoglabs, SingularityNet
+ *
+ * AI helper utilities for neural network configuration and training
+ */
+
 import { Vector3 } from 'three';
 import {
   DroneAction,
@@ -182,19 +195,19 @@ export function generateMissionCoordinates(bounds: number, minDistance: number =
   // Keep generating until we have positions with minimum distance
   do {
     start = new Vector3(
-      (Math.random() - 0.5) * bounds * 0.8, // Use more of the expanded world
+      (Math.random() - 0.5) * bounds * 0.5, // Use less of the world for more open space
       0.5, // Ground level for takeoff
-      (Math.random() - 0.5) * bounds * 0.8
+      (Math.random() - 0.5) * bounds * 0.5
     );
 
     target = new Vector3(
-      (Math.random() - 0.5) * bounds * 0.8,
+      (Math.random() - 0.5) * bounds * 0.5,
       0.5, // Ground level for landing
-      (Math.random() - 0.5) * bounds * 0.8
+      (Math.random() - 0.5) * bounds * 0.5
     );
 
     distance = start.distanceTo(target);
-  } while (distance < minDistance || distance > 60); // Increased max distance for larger world
+  } while (distance < minDistance || distance > 50); // Reduced max distance for less crowded world
 
   return { start, target };
 }
@@ -227,7 +240,7 @@ export function getTrainingEnvironmentConfig(difficulty: 'beginner' | 'intermedi
       return {
         ...baseConfig,
         worldSize: 150,
-        obstacleCount: 10,
+        obstacleCount: 5,
         difficultyLevel: 'beginner',
         enableMovingObstacles: false,
         obstacleTypes: ['gate', 'floating_ring', 'tower']
@@ -237,7 +250,7 @@ export function getTrainingEnvironmentConfig(difficulty: 'beginner' | 'intermedi
       return {
         ...baseConfig,
         worldSize: 200,
-        obstacleCount: 20,
+        obstacleCount: 8,
         difficultyLevel: 'intermediate',
         enableMovingObstacles: true,
         obstacleTypes: ['gate', 'floating_ring', 'tower', 'tunnel', 'narrow_passage', 'wind_zone']
@@ -247,7 +260,7 @@ export function getTrainingEnvironmentConfig(difficulty: 'beginner' | 'intermedi
       return {
         ...baseConfig,
         worldSize: 250,
-        obstacleCount: 30,
+        obstacleCount: 12,
         difficultyLevel: 'advanced',
         enableMovingObstacles: true,
         obstacleTypes: [
@@ -260,7 +273,7 @@ export function getTrainingEnvironmentConfig(difficulty: 'beginner' | 'intermedi
       return {
         ...baseConfig,
         worldSize: 300,
-        obstacleCount: 40,
+        obstacleCount: 15,
         difficultyLevel: 'expert',
         enableMovingObstacles: true,
         obstacleTypes: [

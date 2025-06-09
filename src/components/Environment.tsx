@@ -14,7 +14,7 @@ interface EnvironmentProps {
 
 // Generate trees once and reuse them
 export const generateTrees = (groundSize: number): Tree[] => {
-  return Array.from({ length: 15 }, (_, i) => {
+  return Array.from({ length: 8 }, (_, i) => {
     const x = (Math.random() - 0.5) * groundSize * 0.9;
     const z = (Math.random() - 0.5) * groundSize * 0.9;
     const height = Math.random() * 3 + 2;

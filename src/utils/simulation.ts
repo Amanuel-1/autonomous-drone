@@ -1,3 +1,16 @@
+/**
+ * Autonomous Drone Simulation - Personal Research Project
+ *
+ * MIT License
+ * Copyright (c) 2025 Amanuel Garomsa
+ *
+ * Author: Amanuel Garomsa
+ * Email: amanuelgaromsa@gmail.com
+ * Position: Computer Science Graduate, Icoglabs, SingularityNet
+ *
+ * Core simulation utilities for drone physics and world generation
+ */
+
 import { Vector3 } from 'three';
 import { Building, Tree, DroneState, SimulationControls, DAMAGE_THRESHOLD, COLLISION_DAMAGE, TrainingObstacle } from '../types/simulation';
 
@@ -756,24 +769,56 @@ export const checkCollisionsWithDamage = (
   };
 };
 
-export const getRandomSpawnPosition = (buildings: Building[], areaSize: number): Vector3 => {
+export const getRandomSpawnPosition = (
+  buildings: Building[],
+  trees: Tree[],
+  denseTrees: Tree[],
+  trainingObstacles: TrainingObstacle[],
+  areaSize: number
+): Vector3 => {
   let attempts = 0;
-  const maxAttempts = 50;
+  const maxAttempts = 100;
 
   while (attempts < maxAttempts) {
-    const x = (Math.random() - 0.5) * areaSize * 0.6; // Stay within 60% of area
-    const z = (Math.random() - 0.5) * areaSize * 0.6;
+    const x = (Math.random() - 0.5) * areaSize * 0.4; // Stay within 40% of area for more open space
+    const z = (Math.random() - 0.5) * areaSize * 0.4;
     const y = 0.5; // Start on the ground
 
     const position = new Vector3(x, y, z);
 
-    // Check if position is clear of buildings
+    // Check if position is clear of all obstacles
     let isClear = true;
+
+    // Check buildings (including skyscrapers)
     for (const building of buildings) {
       const distance2D = Math.sqrt((position.x - building.position.x) ** 2 + (position.z - building.position.z) ** 2);
-      if (distance2D < 8) { // Minimum 8 units from any building
+      const clearanceRadius = Math.max(building.size.x, building.size.z) / 2 + 12; // Building radius + 12m clearance
+      if (distance2D < clearanceRadius) {
         isClear = false;
         break;
+      }
+    }
+
+    // Check trees
+    if (isClear) {
+      for (const tree of [...trees, ...denseTrees]) {
+        const distance2D = Math.sqrt((position.x - tree.position.x) ** 2 + (position.z - tree.position.z) ** 2);
+        if (distance2D < tree.radius + 8) { // Tree radius + 8m clearance
+          isClear = false;
+          break;
+        }
+      }
+    }
+
+    // Check training obstacles
+    if (isClear) {
+      for (const obstacle of trainingObstacles) {
+        const distance2D = Math.sqrt((position.x - obstacle.position.x) ** 2 + (position.z - obstacle.position.z) ** 2);
+        const clearanceRadius = Math.max(obstacle.size.x, obstacle.size.z) / 2 + 10; // Obstacle radius + 10m clearance
+        if (distance2D < clearanceRadius) {
+          isClear = false;
+          break;
+        }
       }
     }
 
@@ -784,6 +829,6 @@ export const getRandomSpawnPosition = (buildings: Building[], areaSize: number):
     attempts++;
   }
 
-  // Fallback to landing pad center if no clear spot found
+  // Fallback to a guaranteed clear spot near center
   return new Vector3(0, 0.5, 0);
 };

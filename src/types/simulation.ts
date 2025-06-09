@@ -1,3 +1,16 @@
+/**
+ * Autonomous Drone Simulation - Personal Research Project
+ *
+ * MIT License
+ * Copyright (c) 2025 Amanuel Garomsa
+ *
+ * Author: Amanuel Garomsa
+ * Email: amanuelgaromsa@gmail.com
+ * Position: Computer Science Graduate, Icoglabs, SingularityNet
+ *
+ * Type definitions for drone simulation components
+ */
+
 import { Vector3 } from 'three';
 
 export interface LiDARReading {

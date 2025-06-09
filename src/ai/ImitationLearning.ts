@@ -1,3 +1,16 @@
+/**
+ * Autonomous Drone Simulation - Personal Research Project
+ *
+ * MIT License
+ * Copyright (c) 2025 Amanuel Garomsa
+ *
+ * Author: Amanuel Garomsa
+ * Email: amanuelgaromsa@gmail.com
+ * Position: Computer Science Graduate, Icoglabs, SingularityNet
+ *
+ * Imitation Learning implementation for learning from human demonstrations
+ */
+
 import { DroneState, SimulationControls } from '../types/simulation';
 import { DemonstrationData, DroneAction, ImitationLearningConfig } from '../types/ai';
 import { NeuralNetwork } from './NeuralNetwork';

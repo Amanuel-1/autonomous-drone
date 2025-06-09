@@ -19,3 +19,26 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+Personal Research Project Information:
+
+Author: Amanuel Garomsa
+Email: amanuelgaromsa@gmail.com
+Position: Computer Science Graduate, Icoglabs, SingularityNet
+
+This is a personal research project exploring autonomous drone flight
+using deep reinforcement learning and imitation learning techniques.
+The project demonstrates advanced AI concepts including:
+
+- Deep Q-Learning with experience replay
+- Imitation learning from human demonstrations
+- 3D physics simulation with realistic drone dynamics
+- LiDAR-based obstacle detection and avoidance
+- Hybrid training approaches combining multiple learning paradigms
+
+The research focuses on developing intelligent autonomous systems
+capable of learning complex navigation tasks through both
+supervised learning from demonstrations and reinforcement learning
+from environmental interaction.

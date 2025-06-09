@@ -1,3 +1,16 @@
+/**
+ * Autonomous Drone Simulation - Personal Research Project
+ *
+ * MIT License
+ * Copyright (c) 2025 Amanuel Garomsa
+ *
+ * Author: Amanuel Garomsa
+ * Email: amanuelgaromsa@gmail.com
+ * Position: Computer Science Graduate, Icoglabs, SingularityNet
+ *
+ * Deep Neural Network implementation for autonomous drone control
+ */
+
 import { NeuralNetworkConfig, NetworkWeights, DroneAction } from '../types/ai';
 
 /**

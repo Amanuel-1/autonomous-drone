@@ -159,9 +159,21 @@ pnpm dev
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
+## 👨‍💻 Author
+
+**Amanuel Garomsa**
+- 🎓 Computer Science Graduate
+- 🏢 Currently working at Icoglabs, SingularityNet
+- 📧 Email: amanuelgaromsa@gmail.com
+- 🔬 Personal Research Project
+
 ## 📝 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License © 2025 Amanuel Garomsa
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+This is a personal research project exploring autonomous drone flight using deep reinforcement learning and imitation learning techniques.
 
 ## 🙏 Acknowledgments
 
